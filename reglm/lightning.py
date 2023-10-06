@@ -10,10 +10,9 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import CSVLogger, WandbLogger
 from torch.utils.data import DataLoader
-from torchmetrics import Accuracy
 from datetime import datetime
+from torchmetrics import Accuracy
 sys.path.append('/code/hyena-dna')
-sys.path.append("/code/hyena-reggpt/reglm/")
 from src.models.sequence.long_conv_lm import ConvLMHeadModel
 
 
@@ -240,22 +239,7 @@ class LightningModel(pl.LightningModule):
 
         return trainer
 
-    def compute_accuracy_on_dataset(self, dataset, batch_size=64, num_workers=8, device=0,
-                                    average="macro", multidim_average="global"):
-        dl = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-        acc = Accuracy(task="multiclass", num_classes=16, ignore_index=-1,
-                       average=average, multidim_average=multidim_average).to(torch.device(device))
-        for batch in iter(dl):
-            x, y = batch
-            x = x.to(torch.device(device))
-            y = y.to(torch.device(device))
-            logits = self.forward(x)
-            y_hat = logits.argmax(1)
-            acc.update(y_hat, y)
-
-        return acc.compute().cpu().detach().numpy()
-
-    def compute_positionwise_accuracy_on_dataset(self, dataset, batch_size=64, num_workers=8, device=0):
+    def compute_accuracy_on_dataset(self, dataset, batch_size=64, num_workers=8, device=0):
         dl = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
         
         y_hat = []

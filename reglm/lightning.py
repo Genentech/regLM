@@ -1,23 +1,23 @@
-import numpy as np
-import pandas as pd
+import json
 import os
 import sys
-import json
+from datetime import datetime
+
+import numpy as np
+import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
-from torch import optim
-import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import CSVLogger, WandbLogger
+from torch import optim
 from torch.utils.data import DataLoader
-from datetime import datetime
 from torchmetrics import Accuracy
-sys.path.append('/code/hyena-dna')
+
+sys.path.append("/code/hyena-dna")
 from src.models.sequence.long_conv_lm import ConvLMHeadModel
 
 
-def load_pretrained_model(ckpt_dir='./checkpoints/', model='hyenadna-tiny-1k-seqlen'):
-
+def load_pretrained_model(ckpt_dir="./checkpoints/", model="hyenadna-tiny-1k-seqlen"):
     # Check model name
     assert model in [
         "hyenadna-tiny-16k-seqlen-d128",
@@ -37,17 +37,23 @@ def load_pretrained_model(ckpt_dir='./checkpoints/', model='hyenadna-tiny-1k-seq
     # Download model if not already downloaded
     if not os.path.exists(os.path.join(ckpt_dir, "config.json")):
         print("Downloading model")
-        os.system(f'wget -P {ckpt_dir} https://huggingface.co/LongSafari/{model}/resolve/main/config.json')
-        os.system(f'wget -P {ckpt_dir} https://huggingface.co/LongSafari/{model}/resolve/main/weights.ckpt')
+        os.system(
+            f"wget -P {ckpt_dir} https://huggingface.co/LongSafari/{model}/resolve/main/config.json"
+        )
+        os.system(
+            f"wget -P {ckpt_dir} https://huggingface.co/LongSafari/{model}/resolve/main/weights.ckpt"
+        )
 
     # Load config
-    config = json.load(open(os.path.join(ckpt_dir, 'config.json'), 'r'))
+    config = json.load(open(os.path.join(ckpt_dir, "config.json"), "r"))
 
     # Generate model
     model = ConvLMHeadModel(**config)
 
     # Load weights
-    state_dict = torch.load(os.path.join(ckpt_dir, 'weights.ckpt'), map_location=torch.device("cpu"))
+    state_dict = torch.load(
+        os.path.join(ckpt_dir, "weights.ckpt"), map_location=torch.device("cpu")
+    )
     torch.nn.modules.utils.consume_prefix_in_state_dict_if_present(
         state_dict["state_dict"], "model."
     )
@@ -55,7 +61,7 @@ def load_pretrained_model(ckpt_dir='./checkpoints/', model='hyenadna-tiny-1k-seq
     for key in list(model_state_dict.keys()):
         if "torchmetrics" in key:
             model_state_dict.pop(key)
-    
+
     model.load_state_dict(model_state_dict)
     return model
 
@@ -73,11 +79,11 @@ class LightningModel(pl.LightningModule):
         elif config is not None:
             self.model = ConvLMHeadModel(**config)
         else:
-            raise ValueError('either config or ckpt_dir must be provided.')
+            raise ValueError("either config or ckpt_dir must be provided.")
 
         # Logger
         self.logger_type = logger
-        
+
         # Metrics
         self.train_acc = Accuracy(task="multiclass", num_classes=16, ignore_index=-1)
         self.val_acc = Accuracy(task="multiclass", num_classes=16, ignore_index=-1)
@@ -96,21 +102,21 @@ class LightningModel(pl.LightningModule):
             "9": 11,
         }
         self.base_stoi = {
-             "A": 7,
-             "C": 8,
-             "G": 9,
-             "T": 10,
-             "N": 11,
-         }
-        self.label_itos = {v:k for k, v in self.label_stoi.items()}
-        self.base_itos = {v:k for k, v in self.base_stoi.items()}
-        self.limit_itos = {0:7, 1:8, 2:9, 3:10}
+            "A": 7,
+            "C": 8,
+            "G": 9,
+            "T": 10,
+            "N": 11,
+        }
+        self.label_itos = {v: k for k, v in self.label_stoi.items()}
+        self.base_itos = {v: k for k, v in self.base_stoi.items()}
+        self.limit_itos = {0: 7, 1: 8, 2: 9, 3: 10}
 
         # Loss function
         self.loss = lambda logits, y: F.cross_entropy(logits, y, ignore_index=-1)
 
     def forward(self, x):
-        logits = self.model(x)[0].logits.swapaxes(1,2)
+        logits = self.model(x)[0].logits.swapaxes(1, 2)
         return logits
 
     def training_step(self, batch, batch_idx):
@@ -148,7 +154,7 @@ class LightningModel(pl.LightningModule):
         print(f"Val loss: {val_loss}, val acc: {val_acc}")
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.model.parameters(), lr=float(self.lr))
+        optimizer = optim.AdamW(self.model.parameters(), lr=float(self.lr))
         return optimizer
 
     def count_params(self):
@@ -183,11 +189,16 @@ class LightningModel(pl.LightningModule):
         idx = torch.Tensor(idx).type(torch.long)
         return idx.unsqueeze(0).to(logits.device)
 
-    def train_on_dataset(self,
-                         train_dataset, val_dataset,
-                         batch_size=128, num_workers=8, device=0, max_epochs=3,
-                         val_check_interval=5000,
-                        ):
+    def train_on_dataset(
+        self,
+        train_dataset,
+        val_dataset,
+        batch_size=128,
+        num_workers=8,
+        device=0,
+        max_epochs=3,
+        val_check_interval=5000,
+    ):
         torch.set_float32_matmul_precision("medium")
 
         # Save dataset
@@ -197,10 +208,10 @@ class LightningModel(pl.LightningModule):
         # Logger
         if self.logger_type == "wandb":
             logger = WandbLogger(
-                    name=datetime.now().strftime("%Y_%d_%m_%H_%M"),
-                    log_model=True,
-                    save_dir=self.save_dir,
-                )
+                name=datetime.now().strftime("%Y_%d_%m_%H_%M"),
+                log_model=True,
+                save_dir=self.save_dir,
+            )
         elif self.logger_type == "csv":
             logger = CSVLogger(self.save_dir)
         else:
@@ -239,22 +250,26 @@ class LightningModel(pl.LightningModule):
 
         return trainer
 
-    def compute_accuracy_on_dataset(self, dataset, batch_size=64, num_workers=8, device=0):
-        dl = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
-        
+    def compute_accuracy_on_dataset(
+        self, dataset, batch_size=64, num_workers=8, device=0
+    ):
+        dl = DataLoader(
+            dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
+        )
+
         y_hat = []
         y = []
-        
+
         for batch in iter(dl):
             x = batch[0].to(torch.device(device))
             logits = self.forward(x).squeeze()
             y_hat.append(logits.argmax(1).cpu().detach())
             y.append(batch[1].detach().squeeze())
-        
+
         y_hat = torch.vstack(y_hat)
         y = torch.vstack(y)
 
-        return (y_hat==y).numpy()
+        return (y_hat == y).numpy()
 
     def encode_label(self, label, add_start=False, add_batch_dim=False):
         idx = torch.tensor([self.label_stoi[tok] for tok in label], dtype=torch.long)
@@ -303,7 +318,7 @@ class LightningModel(pl.LightningModule):
 
     def P_seq_given_label(self, seq, log=True, device="cpu"):
         L = self.P_seq(seq, log=log, per_pos=True, device=device)
-        L = L[self.label_len:]
+        L = L[self.label_len :]
         if log:
             return np.sum(L)
         else:
@@ -311,40 +326,47 @@ class LightningModel(pl.LightningModule):
 
     def P_label_given_seq(self, seq, device="cpu"):
         label = seq[0]
-        other_labels = np.setdiff1d(['A', 'C', 'G', 'T', 'N'], label).tolist()
-        Ls = [self.P_seq_given_label(seq, log=False, device=device) for l in [label] + other_labels]
+        other_labels = np.setdiff1d(["A", "C", "G", "T", "N"], label).tolist()
+        Ls = [
+            self.P_seq_given_label(seq, log=False, device=device)
+            for l in [label] + other_labels
+        ]
         LL = np.log(Ls[0])
         marginal_LL = np.log(np.sum(Ls))
         return LL - marginal_LL
 
-    
     @torch.no_grad()
-    def generate(self, label=None, max_new_tokens=None, temperature=1.0, sample=True, device="cpu"):
-
+    def generate(
+        self,
+        label=None,
+        max_new_tokens=None,
+        temperature=1.0,
+        sample=True,
+        device="cpu",
+    ):
         # start sequence
         if label is None:
-            idx = torch.zeros(1,1).type(torch.long)
+            idx = torch.zeros(1, 1).type(torch.long)
         else:
             idx = self.encode_label(label, add_start=True, add_batch_dim=True)
-    
+
         # Format input
         idx = idx.to(torch.device(device))
 
         # bases to add
         if max_new_tokens is None:
             max_new_tokens = self.seq_len + 1 - idx.shape[1]
-        
-        for _ in range(max_new_tokens):
 
+        for _ in range(max_new_tokens):
             # Get logits
             logits = self.forward(idx)[:, :, -1]
-        
+
             # scale by temperature
             logits = logits / temperature
 
             # Get next index
             idx_next = self.logits_to_idx(logits, sample=sample)
-            if idx_next == 0: # stop token is produced
+            if idx_next == 0:  # stop token is produced
                 break
 
             # Add new index

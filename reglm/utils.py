@@ -37,3 +37,38 @@ def tokenize(df, cols, names, n_bins, percentiles=None):
             df["label"] = df[name + "_token"]
 
     return df
+
+
+def downsample_label(df, label, n):
+    rng = np.random.RandomState(0)
+    return pd.concat([df[df.label!=label], df[df.label==label].sample(n, random_state=rng)], axis=1).copy()
+
+
+def split_label_proportional(df, n_val, n_test):
+    rng = np.random.RandomState(0)
+    label_prop = df.label.value_counts(normalize=True)
+    val_sample = np.ceil(label_prop * n_val)
+    test_sample = np.ceil(label_prop * n_test)
+
+    train_df = df.copy()
+    val_df = pd.concat([train_df[train_df.label==label].sample(val_sample[label], random_state=rng) for label in prop.index], axis=1)
+    train_df = train_df.loc[~train_df.index.isin(val_df), :]
+    test_df = pd.concat([train_df[train_df.label==label].sample(test_sample[label], random_state=rng) for label in prop.index], axis=1)
+    train_df = train_df.loc[~train_df.index.isin(test_df), :]
+    return train_df, val_df, test_df
+
+
+def split_label_equal(df, n_val, n_test):
+    labels = np.unique(df.label)
+    rng = np.random.RandomState(0)
+    
+    val_sample = np.ceil(n_val/len(labels))
+    test_sample = np.ceil(n_test/len(labels))
+
+    train_df = df.copy()
+    val_df = pd.concat([train_df[train_df.label==label].sample(val_sample, random_state=rng) for label in labels], axis=1)
+    train_df = train_df.loc[~train_df.index.isin(val_df), :]
+    test_df = pd.concat([train_df[train_df.label==label].sample(test_sample, random_state=rng) for label in labels], axis=1)
+    train_df = train_df.loc[~train_df.index.isin(test_df), :]
+    return train_df, val_df, test_df
+    

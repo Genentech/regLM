@@ -75,28 +75,43 @@ class CharDataset(Dataset):
         return len(self.seqs)
 
     def encode(self, seq, is_labeled=False):
+        """
+        Encode a sequence as a torch tensor of tokens
+        """
         if is_labeled:
+            # Split the input into sequence and label
             label = seq[: self.label_len]
             seq = seq[self.label_len :]
+            # Encode them separately and rejoin
             return torch.tensor(
                 [self.label_stoi[tok] for tok in label]
                 + [self.base_stoi[tok] for tok in seq],
                 dtype=torch.long,
             )
         else:
+            # Only a sequence is provided
             return torch.tensor([self.base_stoi[tok] for tok in seq], dtype=torch.long)
 
     def decode(self, ix, is_labeled=False):
+        """
+        Given a torch tensor of tokens, return the decoded sequence as a string.
+        """
         if is_labeled:
+            # Split the input into sequence and label
             label = ix[: self.label_len]
             seq = ix[self.label_len :]
+            # Decode them separately and rejoin
             return "".join(
                 [self.label_itos[i] for i in label] + [self.base_itos[i] for i in seq]
             )
         else:
+            # Only a sequence is provided
             return "".join([self.base_itos[i] for i in ix])
 
     def __getitem__(self, idx):
+        """
+        Return a single labeled example as a tensor of tokens
+        """
         # Get sequence
         seq = self.seqs[idx]
 
@@ -107,10 +122,10 @@ class CharDataset(Dataset):
         # Get label
         label = self.labels[idx]
 
-        # Label sequence
+        # prefix the label to the sequence
         seq = label + seq
 
-        # Encode sequence
+        # Encode label + sequence
         ix = self.encode(seq, is_labeled=True)
 
         # Generate empty tensors
@@ -118,7 +133,12 @@ class CharDataset(Dataset):
         y = torch.zeros(self.output_len - 1, dtype=torch.long)
 
         # Split sequence
+
+        # Input: <START (0)>, label, sequence
         x[1 : 1 + len(ix)] = ix
+
+        # Output: label, sequence, <END (0)>
         y[: len(ix)] = ix
+        
         y[len(ix) + 1 :] = -1  # index -1 will mask the loss at the inactive locations
         return x, y

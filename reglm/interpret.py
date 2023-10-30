@@ -26,58 +26,33 @@ def generate_random_sequences(n=1, seq_len=1024, seed=0):
     return ["".join(seq) for seq in seqs]
 
 
-def motif_likelihood(seq, motif, motif_idxs, label, model, device=0):
-    # Append the motif to the sequence
-    seq = seq + motif
-
-    # Encode sequence with label
-    idx = model.encode(seq=seq, label=label, add_batch_dim=True, add_start=True).to(
-        torch.device(device)
-    )
-    n_tokens = idx.shape[1]
-
-    # Make predictions
-    logits = model.forward(idx)
-    probs = model.logits_to_probs(logits).cpu().detach().numpy().squeeze()
-
-    # Get predicted probabilities for the motif
-    probs = probs[:, -(len(motif) + 1) : -1]
-
-    # Get likelihood of motif bases
-    likelihood_per_pos = [
-        probs[ix, pos] for ix, pos in zip(motif_idxs, range(n_tokens))
-    ]
-    log_likelihood_per_pos = np.log(likelihood_per_pos)
-
-    return log_likelihood_per_pos.sum()
+def motif_likelihood(seqs, motif, label, model, device=0):
+    log_likelihood_per_pos = model.P_seqs_given_labels([seq+motif for seq in seqs], labels=[label]*len(seqs), per_pos=True, log=True, device=device)
+    return log_likelihood_per_pos[:, -(len(motif)+1):-1].sum(1)
 
 
 def motif_insert(pwms, model, label, ref_label, n=100, seq_len=100):
-    out = []
+    out = pd.DataFrame()
     random_seqs = generate_random_sequences(n=n, seq_len=seq_len)
 
-    for seq in random_seqs:
-        for row in pwms.iterrows():
-            # Get the motif name
-            motif_id = row[0]
+    for row in pwms.iterrows():
+        # Get the motif name
+        motif_id = row[0]
 
-            # Get the consensus sequence
-            consensus = row[1].consensus
-            motif_len = len(consensus)
+        # Get the consensus sequence
+        consensus = row[1].consensus
 
-            # Get the indices corresponding to the motif
-            motif_tokens = model.encode_seq(consensus).numpy().tolist()
+        # Compute log-likelihood with token 00 and 44
+        LL_with_label = motif_likelihood(random_seqs, consensus, label, model)
+        LL_with_ref = motif_likelihood(random_seqs, consensus, ref_label, model)
 
-            # Compute log-likelihood with token 00 and 44
-            LL_with_label = motif_likelihood(seq, consensus, motif_tokens, label, model)
-            LL_with_ref = motif_likelihood(
-                seq, consensus, motif_tokens, ref_label, model
-            )
+        # Compute log-likelihood ratio
+        ratio = LL_with_label - LL_with_ref
+        curr_out = pd.DataFrame({
+            "Sequence":random_seqs,
+            "Motif": motif_id,
+            "LL_ratio": ratio,
+        })
+        out = pd.concat([out, curr_out])
 
-            # Compute log-likelihood ratio
-            ratio = LL_with_label - LL_with_ref
-            out.append([seq, motif_id, ratio])
-
-    out = pd.DataFrame(out)
-    out.columns = ["Sequence", "Motif", "LL_ratio"]
     return out

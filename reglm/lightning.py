@@ -306,7 +306,7 @@ class LightningModel(pl.LightningModule):
         Returns:
             idxs (torch.LongTensor): tensor of shape (N, L)
         """
-        return torch.cat([self.encode_label(label, add_start=add_start), self.encode_seq(seq, add_stop=add_stop)], axis=1)
+        return torch.cat([self.encode_labels(labels, add_start=add_start), self.encode_seqs(seqs, add_stop=add_stop)], axis=1)
 
     def decode(self, idxs):
         """
@@ -358,12 +358,14 @@ class LightningModel(pl.LightningModule):
         Returns:
             tensor of shape (N, L)
         """
-        return probs[F.one_hot(idxs, num_classes=16).swapaxes(1,2).type(torch.bool)].reshape(idxs.shape)
+        mask = F.one_hot(idxs, num_classes=16).type(torch.bool)
+        return torch.masked_select(probs.swapaxes(1, 2).cpu().detach(), mask).reshape(idxs.shape)
         
-    def P_seqs(self, seqs, log=True, per_pos=False, device="cpu"):
+    def P_seqs(self, seqs, labels, log=True, per_pos=False, device="cpu"):
         """
         Args:
             seqs (list, str): Sequences as strings
+            labels(list, str): Labels as strings
             log (bool): Return log likelihood
             per_pos (bool): Return likelihood for each base
             device (str, int): device index
@@ -371,11 +373,10 @@ class LightningModel(pl.LightningModule):
         Returns:
             np.array of shape (N, L) or (N)
         """
-        idxs = self.encode(seqs, add_start=True) # N, L+1
-        logits = self.forward(idxs.to(torch.device(device))) # N, 16, L+1
+        idxs = self.encode(seqs, labels, add_start=True, add_stop=True) # N, L+2
+        logits = self.forward(idxs[:, :-1].to(torch.device(device))) # N, 16, L+1
         probs = self.logits_to_probs(logits) # N, 16, L+1
-        L = probs_to_likelihood(idxs, probs).cpu().detach().numpy() # N, L+1
-        L = L[: :-1]
+        L = self.probs_to_likelihood(idxs[:, 1:], probs).numpy() # N, L+1
         if log:
             L = np.log(L)
         if per_pos:
@@ -386,22 +387,26 @@ class LightningModel(pl.LightningModule):
             else:
                 return np.product(L, 1) # N
 
-    def P_seqs_given_labels(self, seqs, log=True, device="cpu"):
+    def P_seqs_given_labels(self, seqs, labels, per_pos=False, log=True, device="cpu"):
         """
         Args:
             seqs (list, str): Sequences as strings
+            labels(list, str): Labels as strings
             log (bool): Return log likelihood
             device (str, int): device index
 
         Returns:
             np.array of shape (N)
         """
-        L = self.P_seqs(seqs, log=log, per_pos=True, device=device) # N, L
+        L = self.P_seqs(seqs, labels, log=log, per_pos=True, device=device) # N, L
         L = L[:, self.label_len :] # N, seq_len
-        if log:
-            return np.sum(L, 1) # N
+        if per_pos:
+            return L
         else:
-            return np.product(L,1) # N
+            if log:
+                return np.sum(L, 1) # N
+            else:
+                return np.product(L,1) # N
 
     def filter_base_probs(self, probs):
         """
@@ -413,7 +418,7 @@ class LightningModel(pl.LightningModule):
         """
         assert probs.dim() == 2
         assert probs.shape[1] == 16
-        return probs[:, [7,8,9,10]].softmax(1)
+        return probs[:, [7,8,9,10]]
 
     def threshold_probs(self, filtered_probs, top_k=None, top_p=None):
         """
@@ -429,16 +434,16 @@ class LightningModel(pl.LightningModule):
         if top_k is not None:
             p_idxs = filtered_probs.argsort(1, descending=True)
             for seq_idx in range(filtered_probs.shape[0]):
-                filtered_probs[seq_idx, p_idxs[top_k:]] = 0
+                filtered_probs[seq_idx, p_idxs[seq_idx, top_k:]] = 0
             
         if top_p is not None:
             p_sorted, p_idxs = filtered_probs.sort(1, descending=True)
-            p_sorted = p_sorted.cumsum(1) > top_p
-            p_sorted[:, 0] = False
-            for seq_idx in range(filtered_probs.shape[0]):
-                filtered_probs[seq_idx, p_idxs[seq_idx, p_sorted[seq_idx]]] = 0
+            cut = (p_sorted.cumsum(1) > top_p).cpu().detach().numpy().argmax(1).tolist()
+            for seq_idx, cut_idx  in enumerate(cut):
+                if cut_idx < 3:
+                    filtered_probs[seq_idx, p_idxs[seq_idx, cut_idx+1:]] = 0
 
-        return filtered_probs.softmax(1)
+        return filtered_probs
 
     def logits_to_idxs(self, logits, top_k=None, top_p=None):
         """
@@ -460,6 +465,9 @@ class LightningModel(pl.LightningModule):
         # Filter probs
         probs = self.threshold_probs(probs, top_k=top_k, top_p=top_p) # N, 4
 
+        # Re-normalize
+        probs = probs / probs.sum(dim=1, keepdim=True)
+        
         # Sample
         idxs = probs.multinomial(1).squeeze() + 7
 
@@ -515,56 +523,5 @@ class LightningModel(pl.LightningModule):
 
             # Add new indices
             idxs = torch.cat((idxs, idxs_next.unsqueeze(1)), dim=1)
-
-        return self.decode(idxs[:, self.label_len+1:])
-
-    @torch.no_grad()
-    def generate_double(
-        self,
-        label,
-        max_new_tokens=None,
-        temperature=1.0,
-        device="cpu",
-        top_k=None,
-        top_p=None,
-    ):
-        """
-        Args:
-            label (str): String of label tokens
-            max_new_tokens (int): Maximum number of tokens to add
-            temperature (float): Temperature
-            device (str, int): Device index
-            top_k (int): Sample from top k bases
-            top_p (float): Sample from bases with top_p cumulative probability
-            
-        Returns:
-            seq: string
-        """
-        # Check labels
-        assert len(label) == self.label_len
-
-        # bases to add
-        if max_new_tokens is None:
-            max_new_tokens = self.seq_len
-
-        # Encode labels
-        idxs = self.encode_labels([label], add_start=True) # 1, L+1
-
-        # Add bases
-        for _ in range(max_new_tokens//2):
-            new_idxs = []
-            pair_probs = []
-            for new_idx_1 in [7, 8, 9, 10]:
-                idxs_2 = torch.cat((idxs, torch.LongTensor([[new_idx_1]])), 1) # 1, L+2
-                logits_2 = self.forward(idxs.to(torch.device(device)))[:, :, -2:].cpu().detach() # 1, 16, 2
-                probs_2 = self.logits_to_probs(logits_2) # 1, 16, 2
-                for new_idx_2 in [7, 8, 9, 10]:
-                    new_idxs.append((new_idx_1, new_idx_2))
-                    pair_probs.append(probs_2[0, new_idx_1, 0].item() * probs_2[0, new_idx_2, 1].item())
-
-            # Add new indices
-            choose = torch.tensor(pair_probs).softmax(0).multinomial(1).item()
-            choice_idxs = torch.LongTensor(new_idxs[choose]).unsqueeze(0)
-            idxs = torch.cat((idxs, choice_idxs), dim=1)
 
         return self.decode(idxs[:, self.label_len+1:])

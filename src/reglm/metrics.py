@@ -1,12 +1,13 @@
 import sys
+
 import numpy as np
 
-
 sys.path.append("/code/regLM")
-import reglm.dataset
 
 
 def compute_accuracy(model, seqs, shuffle_labels=False):
+    import reglm.dataset
+
     labels = seqs.label
     if shuffle_labels:
         labels = seqs.label.sample(len(seqs))

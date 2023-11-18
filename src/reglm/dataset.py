@@ -35,7 +35,7 @@ class CharDataset(Dataset):
         self.label_len = len(self.labels[0])
         self.output_len = self.seq_len + self.label_len + 2  # <START> label, seq, <End>
         self.n_unique_labels = len(
-            set(np.concatenate([[tok for tok in l] for l in self.labels]))
+            set(np.concatenate([[tok for tok in lab] for lab in self.labels]))
         )
         assert (
             self.n_unique_labels <= 10
@@ -139,6 +139,6 @@ class CharDataset(Dataset):
 
         # Output: label, sequence, <END (0)>
         y[: len(ix)] = ix
-        
+
         y[len(ix) + 1 :] = -1  # index -1 will mask the loss at the inactive locations
         return x, y

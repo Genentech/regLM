@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-import torch
 
 
 def generate_random_sequences(n=1, seq_len=1024, seed=0):
@@ -27,8 +26,14 @@ def generate_random_sequences(n=1, seq_len=1024, seed=0):
 
 
 def motif_likelihood(seqs, motif, label, model, device=0):
-    log_likelihood_per_pos = model.P_seqs_given_labels([seq+motif for seq in seqs], labels=[label]*len(seqs), per_pos=True, log=True, device=device)
-    return log_likelihood_per_pos[:, -(len(motif)+1):-1].sum(1)
+    log_likelihood_per_pos = model.P_seqs_given_labels(
+        [seq + motif for seq in seqs],
+        labels=[label] * len(seqs),
+        per_pos=True,
+        log=True,
+        device=device,
+    )
+    return log_likelihood_per_pos[:, -(len(motif) + 1) : -1].sum(1)
 
 
 def motif_insert(pwms, model, label, ref_label, n=100, seq_len=100):
@@ -48,11 +53,13 @@ def motif_insert(pwms, model, label, ref_label, n=100, seq_len=100):
 
         # Compute log-likelihood ratio
         ratio = LL_with_label - LL_with_ref
-        curr_out = pd.DataFrame({
-            "Sequence":random_seqs,
-            "Motif": motif_id,
-            "LL_ratio": ratio,
-        })
+        curr_out = pd.DataFrame(
+            {
+                "Sequence": random_seqs,
+                "Motif": motif_id,
+                "LL_ratio": ratio,
+            }
+        )
         out = pd.concat([out, curr_out])
 
     return out

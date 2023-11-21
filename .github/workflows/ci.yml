@@ -101,6 +101,15 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           parallel-finished: true
 
+  docs:
+    name: Push Sphinx Pages
+    runs-on: ubuntu-latest
+    steps:
+    - uses: seanzhengw/sphinx-pages@master
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        create_readme: false
+
   publish:
     needs: finalize
     if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}

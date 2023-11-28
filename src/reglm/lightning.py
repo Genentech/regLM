@@ -13,10 +13,13 @@ from torch import optim
 from torch.utils.data import DataLoader, WeightedRandomSampler
 from torchmetrics import Accuracy
 
-sys.path.append("/code/hyena-dna")
 
-
-def load_pretrained_model(ckpt_dir="./checkpoints/", model="hyenadna-tiny-1k-seqlen"):
+def load_pretrained_model(
+    ckpt_dir="./checkpoints/",
+    model="hyenadna-tiny-1k-seqlen",
+    hyenadna_path="/code/hyena-dna",
+):
+    sys.path.append(hyenadna_path)
     from src.models.sequence.long_conv_lm import ConvLMHeadModel
 
     # Check model name
@@ -66,18 +69,30 @@ def load_pretrained_model(ckpt_dir="./checkpoints/", model="hyenadna-tiny-1k-seq
 
 
 class LightningModel(pl.LightningModule):
-    def __init__(self, config=None, ckpt_dir=None, logger=None, save_dir=".", lr=1e-4):
+    def __init__(
+        self,
+        config=None,
+        ckpt_dir=None,
+        logger=None,
+        save_dir=".",
+        lr=1e-4,
+        label_len=None,
+        hyenadna_path="/code/hyena-dna",
+    ):
         super().__init__()
+        sys.path.append(hyenadna_path)
         from src.models.sequence.long_conv_lm import ConvLMHeadModel
 
         self.save_dir = save_dir
+        self.label_len = label_len
         self.save_hyperparameters(ignore=["model"])
         self.lr = lr
 
         # Build model
         if ckpt_dir is not None:
-            self.model = load_pretrained_model(ckpt_dir)
+            self.model = load_pretrained_model(ckpt_dir, hyenadna_path=hyenadna_path)
         elif config is not None:
+            sys.path.append(hyenadna_path)
             self.model = ConvLMHeadModel(**config)
         else:
             raise ValueError("either config or ckpt_dir must be provided.")
@@ -88,8 +103,8 @@ class LightningModel(pl.LightningModule):
         self.logger_type = logger
 
         # Metrics
-        self.train_acc = Accuracy(task="multiclass", num_classes=16, ignore_index=-1)
-        self.val_acc = Accuracy(task="multiclass", num_classes=16, ignore_index=-1)
+        self.train_acc = Accuracy(task="multiclass", num_classes=16, ignore_index=0)
+        self.val_acc = Accuracy(task="multiclass", num_classes=16, ignore_index=0)
 
         # Encoding
         self.label_stoi = {
@@ -115,7 +130,7 @@ class LightningModel(pl.LightningModule):
         self.base_itos = {v: k for k, v in self.base_stoi.items()}
 
         # Loss function
-        self.loss = lambda logits, y: F.cross_entropy(logits, y, ignore_index=-1)
+        self.loss = lambda logits, y: F.cross_entropy(logits, y, ignore_index=0)
 
     def forward(self, x):
         """
@@ -125,7 +140,10 @@ class LightningModel(pl.LightningModule):
         Returns:
             logits (torch.tensor, dtype torch.float32): tensor of shape (N, 16, L)
         """
-        return self.model(x)[0].logits.swapaxes(1, 2)
+        logits = self.model(x)[0].logits.swapaxes(
+            1, 2
+        )  # N, label-1 + seq + 1 + trailing zeros
+        return logits[:, :, self.label_len - 1 :]
 
     def training_step(self, batch, batch_idx):
         x, y = batch
@@ -245,6 +263,9 @@ class LightningModel(pl.LightningModule):
     def compute_accuracy_on_dataset(
         self, dataset, batch_size=64, num_workers=8, device=0
     ):
+        """
+        Return per-example accuracy
+        """
         dl = DataLoader(
             dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
         )
@@ -258,30 +279,26 @@ class LightningModel(pl.LightningModule):
             y_hat.append(logits.argmax(1).cpu().detach())
             y.append(batch[1].detach().squeeze())
 
-        y_hat = torch.vstack(y_hat)
-        y = torch.vstack(y)
+        y_hat = torch.vstack(y_hat).numpy()  # N, L
+        y = torch.vstack(y).numpy()  # N, L
 
-        return (y_hat == y).numpy()
+        is_non_zero = y != 0
+        is_equal = y_hat == y
+        return [e[n] for e, n in zip(is_equal, is_non_zero)]
 
-    def encode_labels(self, labels, add_start=False):
+    def encode_labels(self, labels):
         """
         Args:
             label (list, str): Strings of label tokens
-            add_start (bool): Add a start token (0) before the label
 
         Returns:
-            idxs (torch.LongTensor): tensor of shape (N, L) or (N, L+1)
+            (torch.LongTensor): tensor of shape (N, L)
         """
         if isinstance(labels, str):
             labels = [labels]
-        idxs = torch.LongTensor(
+        return torch.LongTensor(
             [[self.label_stoi[tok] for tok in label] for label in labels]
         )  # N, L
-        if add_start:
-            idxs = torch.cat(
-                (torch.LongTensor([[0]] * idxs.shape[0]), idxs), axis=1
-            )  # N, L+1
-        return idxs
 
     def encode_seqs(self, seqs, add_stop=False):
         """
@@ -300,16 +317,15 @@ class LightningModel(pl.LightningModule):
         )  # N, L
         if add_stop:
             idxs = torch.cat(
-                (idxs, torch.LongTensor([[0]] * idxs.shape[0])), axis=1
+                (idxs, torch.LongTensor([[1]] * idxs.shape[0])), axis=1
             )  # N, L+1
         return idxs
 
-    def encode(self, seqs, labels, add_start=False, add_stop=False):
+    def encode(self, seqs, labels, add_stop=False):
         """
         Args:
             seqs (list, str): Strings of base tokens
             label (list, str): Strings of label tokens
-            add_start (bool): Add a start token (0) before the label
             add_stop (bool): Add an end token (0) after the sequence
 
         Returns:
@@ -317,7 +333,7 @@ class LightningModel(pl.LightningModule):
         """
         return torch.cat(
             [
-                self.encode_labels(labels, add_start=add_start),
+                self.encode_labels(labels),
                 self.encode_seqs(seqs, add_stop=add_stop),
             ],
             axis=1,
@@ -346,7 +362,7 @@ class LightningModel(pl.LightningModule):
         for seq_idxs in idxs:
             curr_seq = []
             for pos, ix in enumerate(seq_idxs):
-                if (ix == 0) and (pos > 0):
+                if ix == 1:
                     break
                 curr_seq.append(self.base_itos[ix])
             seqs.append("".join(curr_seq))
@@ -379,32 +395,6 @@ class LightningModel(pl.LightningModule):
             idxs.shape
         )
 
-    def P_seqs(self, seqs, labels, log=True, per_pos=False, device="cpu"):
-        """
-        Args:
-            seqs (list, str): Sequences as strings
-            labels(list, str): Labels as strings
-            log (bool): Return log likelihood
-            per_pos (bool): Return likelihood for each base
-            device (str, int): device index
-
-        Returns:
-            np.array of shape (N, L) or (N)
-        """
-        idxs = self.encode(seqs, labels, add_start=True, add_stop=True)  # N, L+2
-        logits = self.forward(idxs[:, :-1].to(torch.device(device)))  # N, 16, L+1
-        probs = self.logits_to_probs(logits)  # N, 16, L+1
-        L = self.probs_to_likelihood(idxs[:, 1:], probs).numpy()  # N, L+1
-        if log:
-            L = np.log(L)
-        if per_pos:
-            return L
-        else:
-            if log:
-                return np.sum(L, 1)  # N
-            else:
-                return np.product(L, 1)  # N
-
     def P_seqs_given_labels(self, seqs, labels, per_pos=False, log=True, device="cpu"):
         """
         Args:
@@ -416,8 +406,12 @@ class LightningModel(pl.LightningModule):
         Returns:
             np.array of shape (N)
         """
-        L = self.P_seqs(seqs, labels, log=log, per_pos=True, device=device)  # N, L
-        L = L[:, self.label_len :]  # N, seq_len
+        idxs = self.encode(seqs, labels, add_stop=True)  # N, label+seq+1 00AA1
+        logits = self.forward(idxs[:, :-1].to(torch.device(device)))  # N, 16, seq + 1
+        probs = self.logits_to_probs(logits)  # N, 16, seq+1
+        L = self.probs_to_likelihood(idxs, probs).numpy()  # N, seq+1
+        if log:
+            L = np.log(L)
         if per_pos:
             return L
         else:
@@ -426,7 +420,10 @@ class LightningModel(pl.LightningModule):
             else:
                 return np.product(L, 1)  # N
 
-    def filter_base_probs(self, probs):
+    def normalize_filtered_probs(self, filtered_probs):
+        return filtered_probs / filtered_probs.sum(dim=1, keepdim=True)
+
+    def filter_base_probs(self, probs, normalize=True):
         """
         Args:
             probs (torch.tensor, dtype torch.float32): tensor of shape (N, 16)
@@ -436,7 +433,10 @@ class LightningModel(pl.LightningModule):
         """
         assert probs.dim() == 2
         assert probs.shape[1] == 16
-        return probs[:, [7, 8, 9, 10]]
+        filtered_probs = probs[:, [7, 8, 9, 10]]
+        if normalize:
+            filtered_probs = self.normalize_filtered_probs(filtered_probs)
+        return filtered_probs
 
     def threshold_probs(self, filtered_probs, top_k=None, top_p=None):
         """
@@ -463,7 +463,9 @@ class LightningModel(pl.LightningModule):
 
         return filtered_probs
 
-    def logits_to_idxs(self, logits, top_k=None, top_p=None):
+    def logits_to_idxs(
+        self, logits, random_state=None, top_k=None, top_p=None, normalize_filtered=True
+    ):
         """
         Args:
             logits (torch.tensor, dtype torch.float32): tensor of shape (N, 16)
@@ -471,14 +473,14 @@ class LightningModel(pl.LightningModule):
         Returns:
             idxs (torch.LongTensor): tensor of shape (N)
         """
-        assert logits.dim() == 2
-        assert logits.shape[1] == 16
+        assert logits.dim() == 2, logits.shape
+        assert logits.shape[1] == 16, logits.shape
 
         # Get probabilities
         probs = self.logits_to_probs(logits)  # N, 16
 
         # Subset to valid bases
-        probs = self.filter_base_probs(probs)  # N, 4
+        probs = self.filter_base_probs(probs, normalize=normalize_filtered)  # N, 4
 
         # Filter probs
         probs = self.threshold_probs(probs, top_k=top_k, top_p=top_p)  # N, 4
@@ -487,7 +489,10 @@ class LightningModel(pl.LightningModule):
         probs = probs / probs.sum(dim=1, keepdim=True)
 
         # Sample
-        idxs = probs.multinomial(1).squeeze() + 7
+        if random_state is None:
+            idxs = probs.multinomial(1).squeeze() + 7
+        else:
+            idxs = probs.multinomial(1, generator=random_state).squeeze() + 7
 
         # Send to device
         return idxs.to(logits.device)
@@ -501,6 +506,8 @@ class LightningModel(pl.LightningModule):
         device="cpu",
         top_k=None,
         top_p=None,
+        normalize_filtered=True,
+        seed=None,
     ):
         """
         Args:
@@ -510,6 +517,8 @@ class LightningModel(pl.LightningModule):
             device (str, int): Device index
             top_k (int): Sample from top k bases
             top_p (float): Sample from bases with top_p cumulative probability
+            normalize_filtered (bool): Normalize probabilities to sum to 1
+                after filtering
 
         Returns:
             seqs (list): List of strings
@@ -524,23 +533,36 @@ class LightningModel(pl.LightningModule):
             max_new_tokens = self.seq_len
 
         # Encode labels
-        idxs = self.encode_labels(labels, add_start=True).to(
-            torch.device(device)
-        )  # N, L+1
+        idxs = self.encode_labels(labels).to(torch.device(device))  # N, L+1
+
+        # Get random state
+        rng = torch.Generator(device=torch.device(device))
+        if seed is not None:
+            rng.manual_seed(seed)
 
         # Add bases
         for _ in range(max_new_tokens):
             # Get logits
-            logits = self.forward(idxs)[:, :, -1]  # N, 16
+            logits_next = self.forward(idxs)[:, :, -1]  # N, 16
 
             if temperature != 1.0:
                 # scale by temperature
-                logits = logits / temperature
+                logits_next = logits_next / temperature
 
             # Get next indices
-            idxs_next = self.logits_to_idxs(logits, top_k=top_k, top_p=top_p)  # N
+            idxs_next = self.logits_to_idxs(
+                logits_next,
+                random_state=rng,
+                top_k=top_k,
+                top_p=top_p,
+                normalize_filtered=normalize_filtered,
+            )  # N
 
             # Add new indices
             idxs = torch.cat((idxs, idxs_next.unsqueeze(1)), dim=1)
 
-        return self.decode(idxs[:, self.label_len + 1 :])
+        return self.decode(idxs[:, self.label_len :])
+
+    def on_save_checkpoint(self, checkpoint):
+        checkpoint["hyper_parameters"]["seq_len"] = self.seq_len
+        checkpoint["hyper_parameters"]["label_len"] = self.label_len

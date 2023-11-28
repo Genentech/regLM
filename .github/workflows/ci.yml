@@ -1,24 +1,14 @@
-# GitHub Actions configuration **EXAMPLE**,
-# MODIFY IT ACCORDING TO YOUR NEEDS!
-# Reference: https://docs.github.com/en/actions
-
 name: tests
 
 on:
   push:
-    # Avoid using all the resources/limits available by checking only
-    # relevant branches and tags. Other branches can be checked via PRs.
     branches: [main]
     tags: ['v[0-9]*', '[0-9]+.[0-9]+*']  # Match tags that resemble a version
   pull_request:  # Run in every PR
   workflow_dispatch:  # Allow manually triggering the workflow
-  schedule:
-    # Run roughly every 15 days at 00:00 UTC
-    # (useful to check if updates on dependencies break the package)
-    - cron: '0 0 1,16 * *'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: >-
@@ -60,12 +50,12 @@ jobs:
     strategy:
       matrix:
         python:
-        - "3.7"  # oldest Python supported by PSF
+        - "3.8"  # oldest Python supported by PSF
         - "3.11"  # newest Python that is stable
         platform:
         - ubuntu-latest
-        - macos-latest
-        - windows-latest
+          # - macos-latest
+          # - windows-latest
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v3
@@ -105,30 +95,44 @@ jobs:
     name: Push Sphinx Pages
     runs-on: ubuntu-latest
     steps:
-    - uses: seanzhengw/sphinx-pages@master
-      with:
-        github_token: ${{ secrets.GITHUB_TOKEN }}
-        create_readme: false
-
-  publish:
-    needs: finalize
-    if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with: {python-version: "3.11"}
-      - name: Retrieve pre-built distribution files
-        uses: actions/download-artifact@v3
-        with: {name: python-distribution-files, path: dist/}
-      - name: Publish Package
-        env:
+      - uses: actions/setup-python@v3
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: >-
+          pip install --upgrade pip
+          pip install Cython wheel
+          pip install -r docs/requirements.txt
+      - name: Sphinx build
+        run: |
+          sphinx-build docs _build
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          publish_branch: gh-pages
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: _build/
+          force_orphan: true
+#  publish:
+#    needs: finalize
+#    if: ${{ github.event_name == 'push' && contains(github.ref, 'refs/tags/') }}
+#    runs-on: ubuntu-latest
+#    permissions:
+#      contents: write
+#    steps:
+#      - uses: actions/checkout@v3
+#      - uses: actions/setup-python@v4
+#        with: {python-version: "3.11"}
+#      - name: Retrieve pre-built distribution files
+#        uses: actions/download-artifact@v3
+#        with: {name: python-distribution-files, path: dist/}
+#      - name: Publish Package
+#        env:
           # TODO: Set your PYPI_TOKEN as a secret using GitHub UI
           # - https://pypi.org/help/#apitoken
           # - https://docs.github.com/en/actions/security-guides/encrypted-secrets
-          TWINE_REPOSITORY: pypi
-          TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
-        run: pipx run tox -e publish
+          # TWINE_REPOSITORY: pypi
+          # TWINE_USERNAME: __token__
+          # TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+          #        run: pipx run tox -e publish

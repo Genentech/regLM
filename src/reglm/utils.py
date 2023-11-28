@@ -18,12 +18,15 @@ def get_percentiles(values, n_bins=None, qlist=None):
 
 def get_labels(values, percentiles):
     """
-    Return labels for sequences
+    Return labels for sequences given cutoff percentiles
     """
     return [str(x) for x in np.digitize(values, percentiles)]
 
 
 def tokenize(df, cols, names, n_bins, percentiles=None):
+    """
+    Create labels for sequences by dividing them into bins
+    """
     if percentiles is None:
         percentiles = dict()
         for col in cols:

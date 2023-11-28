@@ -1,5 +1,4 @@
-regLM is a toolkit for training hyenaDNA-based autoregressive language models on DNA sequences.
-
+regLM is a toolkit for training HyenaDNA-based autoregressive language models on DNA sequences.
 
 ## Contents
 
@@ -7,10 +6,8 @@ regLM is a toolkit for training hyenaDNA-based autoregressive language models on
 :maxdepth: 2
 
 Overview <readme>
-Contributions & Help <contributing>
 License <license>
 Authors <authors>
-Changelog <changelog>
 Module Reference <api/modules>
 ```
 
@@ -19,8 +16,3 @@ Module Reference <api/modules>
 * {ref}`genindex`
 * {ref}`modindex`
 * {ref}`search`
-
-[Sphinx]: http://www.sphinx-doc.org/
-[Markdown]: https://daringfireball.net/projects/markdown/
-[reStructuredText]: http://www.sphinx-doc.org/en/master/usage/restructuredtext/basics.html
-[MyST]: https://myst-parser.readthedocs.io/en/latest/

@@ -28,12 +28,8 @@ class CharDataset(Dataset):
         self.rc = rc
 
         # maximum sequence length
-        if seq_len is None:
-            seq_len = np.max([len(seq) for seq in self.seqs])
-        self.seq_len = seq_len
-
+        self.seq_len = seq_len or np.max([len(seq) for seq in self.seqs])
         self.label_len = len(self.labels[0])
-        self.output_len = self.seq_len + self.label_len + 2  # <START> label, seq, <End>
         self.n_unique_labels = len(
             set(np.concatenate([[tok for tok in lab] for lab in self.labels]))
         )
@@ -74,43 +70,65 @@ class CharDataset(Dataset):
     def __len__(self):
         return len(self.seqs)
 
-    def encode(self, seq, is_labeled=False):
+    def encode_seq(self, seq):
         """
         Encode a sequence as a torch tensor of tokens
-        """
-        if is_labeled:
-            # Split the input into sequence and label
-            label = seq[: self.label_len]
-            seq = seq[self.label_len :]
-            # Encode them separately and rejoin
-            return torch.tensor(
-                [self.label_stoi[tok] for tok in label]
-                + [self.base_stoi[tok] for tok in seq],
-                dtype=torch.long,
-            )
-        else:
-            # Only a sequence is provided
-            return torch.tensor([self.base_stoi[tok] for tok in seq], dtype=torch.long)
 
-    def decode(self, ix, is_labeled=False):
+        Args:
+            seq (str): DNA sequence
+
+        Returns:
+            torch.LongTensor of shape (seq_len,)
+        """
+        return torch.LongTensor([self.base_stoi[tok] for tok in seq])
+
+    def encode_label(self, label):
+        """
+        Encode a label as a torch tensor of tokens
+
+        Args:
+            label (str): label token sequence
+
+        Returns:
+            torch.LongTensor of shape (label_len,)
+        """
+        return torch.tensor([self.label_stoi[tok] for tok in label])
+
+    def decode(self, idxs, is_labeled=False):
         """
         Given a torch tensor of tokens, return the decoded sequence as a string.
+
+        Args:
+            idxs (list, torch.LongTensor): list or 1-D tensor
+            is_labeled (bool): Whether labels are included
+
+        Returns:
+            labeled sequence as a string
         """
+        if isinstance(idxs, torch.Tensor):
+            idxs = idxs.detach().cpu().tolist()
         if is_labeled:
             # Split the input into sequence and label
-            label = ix[: self.label_len]
-            seq = ix[self.label_len :]
+            label = idxs[: self.label_len]
+            seq = idxs[self.label_len :]
             # Decode them separately and rejoin
             return "".join(
                 [self.label_itos[i] for i in label] + [self.base_itos[i] for i in seq]
             )
         else:
             # Only a sequence is provided
-            return "".join([self.base_itos[i] for i in ix])
+            return "".join([self.base_itos[i] for i in idxs])
 
     def __getitem__(self, idx):
         """
         Return a single labeled example as a tensor of tokens
+
+        Args:
+            idx: Index of example to return
+
+        Returns:
+            x (torch.LongTensor): tensor of shape (self.seq_len + self.label_len, )
+            y (torch.LongTensor): tensor of shape (self.seq_len + 1, )
         """
         # Get sequence
         seq = self.seqs[idx]
@@ -119,26 +137,25 @@ class CharDataset(Dataset):
         if self.rc and self.rng.randint(2):
             seq = "".join([self.rc_hash[base] for base in reversed(seq)])
 
+        # Encode sequence
+        seq = self.encode_seq(seq)
+
         # Get label
         label = self.labels[idx]
 
-        # prefix the label to the sequence
-        seq = label + seq
-
-        # Encode label + sequence
-        ix = self.encode(seq, is_labeled=True)
+        # Encode label
+        label = self.encode_label(label)
 
         # Generate empty tensors
-        x = torch.zeros(self.output_len - 1, dtype=torch.long)
-        y = torch.zeros(self.output_len - 1, dtype=torch.long)
+        x = torch.zeros(self.seq_len + self.label_len, dtype=torch.long)
+        y = torch.zeros(self.seq_len + 1, dtype=torch.long)
 
-        # Split sequence
+        # Input: label + sequence + END(1) + trailing zeros
+        x[: self.label_len] = label
+        x[self.label_len : self.label_len + len(seq)] = seq
 
-        # Input: <START (0)>, label, sequence
-        x[1 : 1 + len(ix)] = ix
+        # Output: sequence + END (1) + trailing zeros
+        y[: len(seq)] = seq
+        y[len(seq)] = 1
 
-        # Output: label, sequence, <END (0)>
-        y[: len(ix)] = ix
-
-        y[len(ix) + 1 :] = -1  # index -1 will mask the loss at the inactive locations
         return x, y

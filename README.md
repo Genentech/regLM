@@ -1,5 +1,5 @@
-# regLM
 
+# regLM
 regLM is a toolkit for training hyenaDNA-based autoregressive language models on DNA sequences and generating novel regulatory elements.
 
 ![regLM schematic](fig1.png)
@@ -19,8 +19,8 @@ To use regLM, first install HyenaDNA from GitHub following the instructions: htt
 
 ### 2. Install regLM
 ```
-git clone https://github.com/Genentech/polygraph.git
-cd polygraph
+git clone https://github.com/Genentech/regLM.git
+cd regLM
 pip install .
 ```
 

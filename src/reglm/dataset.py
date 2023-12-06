@@ -6,7 +6,10 @@ from torch.utils.data import Dataset
 class CharDataset(Dataset):
     def __init__(self, seqs, labels, seq_len=None, rc=False, seed=0):
         """
-        A dataset class to produce tokenized sequences for regLM.
+        A dataset class to produce tokenized sequences for training regLM.
+
+        Each sequence will be represented as 0<LABEL><SEQ>1; hence 0 is the start
+        token and 1 is the end token.
 
         Args:
             seqs (list): List of sequences.
@@ -30,11 +33,11 @@ class CharDataset(Dataset):
         # maximum sequence length
         self.seq_len = seq_len or np.max([len(seq) for seq in self.seqs])
         self.label_len = len(self.labels[0])
-        self.n_unique_labels = len(
-            set(np.concatenate([[tok for tok in lab] for lab in self.labels]))
+        self.unique_labels = set(
+            np.concatenate([[tok for tok in lab] for lab in self.labels])
         )
         assert (
-            self.n_unique_labels <= 10
+            len(self.unique_labels) <= 10
         ), ">10 label classes are currently not supported"
 
         # Encoding
@@ -122,12 +125,14 @@ class CharDataset(Dataset):
     def __getitem__(self, idx):
         """
         Return a single labeled example as a tensor of tokens
+        x = 0<LABEL><SEQ>
+        y = <SEQ>1
 
         Args:
             idx: Index of example to return
 
         Returns:
-            x (torch.LongTensor): tensor of shape (self.seq_len + self.label_len, )
+            x (torch.LongTensor): tensor of shape (1 + self.label_len + self.seq_len)
             y (torch.LongTensor): tensor of shape (self.seq_len + 1, )
         """
         # Get sequence
@@ -147,14 +152,14 @@ class CharDataset(Dataset):
         label = self.encode_label(label)
 
         # Generate empty tensors
-        x = torch.zeros(self.seq_len + self.label_len, dtype=torch.long)
+        x = torch.zeros(self.seq_len + self.label_len + 1, dtype=torch.long)
         y = torch.zeros(self.seq_len + 1, dtype=torch.long)
 
-        # Input: label + sequence + END(1) + trailing zeros
-        x[: self.label_len] = label
-        x[self.label_len : self.label_len + len(seq)] = seq
+        # Input: START(0) + label + sequence + trailing zeros (will be ignored)
+        x[1 : 1 + self.label_len] = label
+        x[1 + self.label_len : 1 + self.label_len + len(seq)] = seq
 
-        # Output: sequence + END (1) + trailing zeros
+        # Output: sequence + END (1) + trailing zeros (will be ignored)
         y[: len(seq)] = seq
         y[len(seq)] = 1
 

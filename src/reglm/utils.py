@@ -33,12 +33,11 @@ def tokenize(df, cols, names, n_bins, percentiles=None):
             percentiles[col] = get_percentiles(df[col], n_bins=n_bins)
             print(col, percentiles[col].tolist())
 
+    df["label"] = [""] * len(df)
+
     for name, col in zip(names, cols):
         df[name + "_token"] = get_labels(df[col], percentiles[col])
-        if "label" in df.columns:
-            df["label"] = df["label"] + df[name + "_token"]
-        else:
-            df["label"] = df[name + "_token"]
+        df["label"] = df["label"] + df[name + "_token"]
 
     return df
 

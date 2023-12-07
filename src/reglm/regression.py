@@ -2,15 +2,14 @@ import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
 import torch
-from bpnetlite.attributions import (dinucleotide_shuffle,
-                                    hypothetical_attributions)
+from bpnetlite.attributions import dinucleotide_shuffle, hypothetical_attributions
 from captum.attr import DeepLiftShap
+from enformer_pytorch import Enformer
 from enformer_pytorch.data import str_to_one_hot
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import CSVLogger
 from torch import nn, optim
 from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
-from enformer_pytorch import Enformer
 
 
 class SeqDataset(Dataset):
@@ -18,12 +17,15 @@ class SeqDataset(Dataset):
     Torch dataset class for training enformer-based regression models
 
     Args:
-        seqs (list, pd.DataFrame): either a list of DNA sequences, or a dataframe whose first column is DNA sequences and remaining columns are labels.
-        seq_len (int): Length of sequences to return. Sequences will be padded with Ns on the right to reach this length.
+        seqs (list, pd.DataFrame): either a list of DNA sequences, or a dataframe whose
+            first column is DNA sequences and remaining columns are labels.
+        seq_len (int): Length of sequences to return. Sequences will be padded with Ns
+            on the right to reach this length.
     """
+
     def __init__(self, seqs, seq_len):
         super().__init__()
-        
+
         self.is_labeled = False
         self.seq_len = seq_len
 
@@ -41,7 +43,6 @@ class SeqDataset(Dataset):
         return len(self.seqs)
 
     def __getitem__(self, idx):
-
         # Get sequence
         seq = self.seqs[idx]
 
@@ -51,7 +52,7 @@ class SeqDataset(Dataset):
 
         # Pad sequence
         if len(seq) < self.seq_len:
-            seq = seq + "N"*(self.seq_len - len(seq))
+            seq = seq + "N" * (self.seq_len - len(seq))
 
         # One-hot encode
         seq = str_to_one_hot(seq)
@@ -75,6 +76,7 @@ class EnformerModel(pl.LightningModule):
         depth (int): Number of transformer layers
         n_downsamples (int): Number of conv/pool blocks
     """
+
     def __init__(
         self,
         lr=1e-4,
@@ -103,7 +105,7 @@ class EnformerModel(pl.LightningModule):
                 num_downsamples=n_downsamples,
                 target_length=-1,
             )._trunk
-        self.head = nn.Linear(dim*2, n_tasks, bias=True)   
+        self.head = nn.Linear(dim * 2, n_tasks, bias=True)
 
         # Training params
         self.lr = lr
@@ -124,8 +126,8 @@ class EnformerModel(pl.LightningModule):
 
         x = self.trunk(x)  # N, L, dim*2
         x = self.head(x)  # N, L, n_tasks
-        x = x.mean(1) # N, n_tasks
-        
+        x = x.mean(1)  # N, n_tasks
+
         if (self.loss_type == "poisson") and (not logits):
             x = torch.exp(x)
         return x
@@ -179,8 +181,8 @@ class EnformerModel(pl.LightningModule):
                 train_dataset,
                 batch_size=batch_size,
                 shuffle=True,
-                num_workers=num_workers
-                )
+                num_workers=num_workers,
+            )
         else:
             sampler = WeightedRandomSampler(
                 weights=weights,
@@ -194,7 +196,7 @@ class EnformerModel(pl.LightningModule):
                 num_workers=num_workers,
                 sampler=sampler,
             )
-        
+
         val_dl = DataLoader(
             val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
         )

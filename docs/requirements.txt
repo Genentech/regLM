@@ -1,3 +1,6 @@
+bpnetlite < 0.6.0
+captum == 0.5.0
+enformer_pytorch
 furo==2021.11.16
 # Requirements file for ReadTheDocs, check .readthedocs.yml.
 # To build the module reference correctly, make sure every external package

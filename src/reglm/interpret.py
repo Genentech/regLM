@@ -25,7 +25,7 @@ def generate_random_sequences(n=1, seq_len=1024, seed=0):
     return ["".join(seq) for seq in seqs]
 
 
-def motif_likelihood(seqs, motif, label, model, device=0):
+def motif_likelihood(seqs, motif, label, model):
     """
     Return the log-likelihood of a motif occurring at the end of
     each of the given sequences.
@@ -35,22 +35,22 @@ def motif_likelihood(seqs, motif, label, model, device=0):
         motif (seq): Motif sequence
         label (list): Labels
         model (pl.LightningModule): regLM model
-        device (int): GPU index
 
     Returns:
         (list): log-likelihoods
     """
     log_likelihood_per_pos = model.P_seqs_given_labels(
-        [seq + motif for seq in seqs],
+        seqs=[seq + motif for seq in seqs],
         labels=[label] * len(seqs),
         per_pos=True,
         log=True,
-        device=device,
     )
-    return log_likelihood_per_pos[:, -(len(motif) + 1) : -1].sum(1)
+    motif_likelihood = log_likelihood_per_pos[:, -len(motif) :]
+    assert motif_likelihood.shape == (len(seqs), len(motif)), motif_likelihood.shape
+    return motif_likelihood.sum(1)
 
 
-def motif_insert(pwms, model, label, ref_label, n=100, seq_len=100, device=0):
+def motif_insert(pwms, model, label, ref_label, n=100, seq_len=100):
     """
     Insert motifs into random sequences and calculate log-likelihood ratio
     of each motif given label vs. reference label.
@@ -62,7 +62,6 @@ def motif_insert(pwms, model, label, ref_label, n=100, seq_len=100, device=0):
         ref_label (str):
         n (int):
         seq_len (int):
-        device (int): GPU index
 
     Returns:
         (list): log-likelihoods
@@ -78,12 +77,8 @@ def motif_insert(pwms, model, label, ref_label, n=100, seq_len=100, device=0):
         consensus = row[1].consensus
 
         # Compute log-likelihood with token 00 and 44
-        LL_with_label = motif_likelihood(
-            random_seqs, consensus, label, model, device=device
-        )
-        LL_with_ref = motif_likelihood(
-            random_seqs, consensus, ref_label, model, device=device
-        )
+        LL_with_label = motif_likelihood(random_seqs, consensus, label, model)
+        LL_with_ref = motif_likelihood(random_seqs, consensus, ref_label, model)
 
         # Compute log-likelihood ratio
         ratio = LL_with_label - LL_with_ref

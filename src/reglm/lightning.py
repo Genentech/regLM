@@ -146,14 +146,16 @@ class LightningModel(pl.LightningModule):
         logits = self.model(x)[0].logits.swapaxes(
             1, 2
         )  # N, label + seq + end + trailing zeros
+
+        # Drop the label probabilities
         if drop_label:
-            # Drop the label probabilities
-            logits = logits[:, :, self.label_len :]  # N, seq + end + trailing zeros
+            logits = logits[:, :, self.label_len :]  # N, seq + end + trailing
+
         return logits
 
     def training_step(self, batch, batch_idx):
         x, y = batch
-        logits = self.forward(x, drop_label=True)  # N, seq + end + trailing zeros
+        logits = self.forward(x, drop_label=True)  # N, seq + end + trailing
         loss = self.loss(logits, y)  # Loss will be calculated over seq + end positions
         self.log(
             "train_loss",
@@ -167,7 +169,7 @@ class LightningModel(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
-        logits = self.forward(x, drop_label=True)  # N, seq + end + trailing zeros
+        logits = self.forward(x, drop_label=True)  # N, seq + end + trailing
         loss = self.loss(logits, y)  # Loss will be calculated over seq + end positions
         self.val_acc.update(logits.argmax(1), y)
         self.log(
@@ -277,6 +279,7 @@ class LightningModel(pl.LightningModule):
         Return per-example accuracy
         Note: this will include the accuracy of predicting the END token (1)
         """
+
         dl = DataLoader(
             dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
         )
@@ -284,11 +287,14 @@ class LightningModel(pl.LightningModule):
         y_hat = []
         y = []
 
+        self.eval()
         for batch in iter(dl):
             x = batch[0].to(self.device)
-            logits = self.forward(x, drop_label=True).squeeze()
-            y_hat.append(logits.argmax(1).cpu().detach())
-            y.append(batch[1].detach().squeeze())
+            logits = self.forward(
+                x, drop_label=True
+            ).squeeze()  # N, 16, seq+end+trailing
+            y_hat.append(logits.argmax(1).cpu().detach())  # N, seq+end+trailing
+            y.append(batch[1].detach().squeeze())  # N, seq+end+trailing zeros
 
         y_hat = torch.vstack(y_hat).numpy()  # N, L
         y = torch.vstack(y).numpy()  # N, L
@@ -378,18 +384,20 @@ class LightningModel(pl.LightningModule):
         for x in idxs:
             curr_seq = []
 
-            # Drop start token
-            if x[0] == 0:
-                x = x[1:]
-
-            # Replace non-bases with N
-            x[x < 7] = 11
-            x[x > 11] = 11
-
             # Decode
             for pos, ix in enumerate(x):
+                # Ignore start token
+                if (pos == 0) and (ix == 0):
+                    continue
+
+                # Terminate at end token
                 if ix == 1:
                     break
+
+                # Replace non-bases with N
+                elif (ix < 7) or (ix > 11):
+                    ix = 11
+
                 curr_seq.append(self.base_itos[ix])
 
             seqs.append("".join(curr_seq))
@@ -417,11 +425,11 @@ class LightningModel(pl.LightningModule):
         Returns:
             tensor of shape (N, L)
         """
-        assert probs.dim() == 3
-        assert probs.shape[1] == 16
-        assert idxs.dim() == 2
-        assert idxs.shape[0] == probs.shape[0]
-        assert idxs.shape[1] == probs.shape[2]
+        assert probs.dim() == 3, probs.shape
+        assert probs.shape[1] == 16, probs.shape
+        assert idxs.dim() == 2, idxs.shape
+        assert idxs.shape[0] == probs.shape[0], (idxs.shape, probs.shape)
+        assert idxs.shape[1] == probs.shape[2], (idxs.shape, probs.shape)
 
         mask = F.one_hot(idxs, num_classes=16).type(torch.bool)
         return torch.masked_select(probs.swapaxes(1, 2).cpu().detach(), mask).reshape(
@@ -429,14 +437,32 @@ class LightningModel(pl.LightningModule):
         )
 
     def P_seqs(self, seqs, labels, per_pos=False, log=True):
+        """
+        Args:
+            seqs (list, str): Sequences as strings
+            labels(list, str): Labels as strings
+            log (bool): Return log likelihood
+            include_end (bool): Include the end token
+
+        Returns:
+            np.array of shape (N)
+        """
         idxs = self.encode(
             seqs, labels, add_start=True, add_stop=True
         )  # N, 0+label+seq+1
-        logits = self.forward(
-            idxs.to(self.device), drop_label=False
-        )  # N, 16, label+seq+1
+
+        # Compute probabilities
+        self.eval()
+        logits = self.forward(idxs.to(self.device), drop_label=False)[
+            :, :, :-1
+        ]  # N, 16, label+seq+1
         probs = self.logits_to_probs(logits)  # N, 16, label+seq+1
-        L = self.probs_to_likelihood(probs, idxs[:, 1:]).numpy()  # N, label+seq+1
+
+        # Compute likelihood
+        idxs = idxs[:, 1:]  # N, label+seq+1
+        L = self.probs_to_likelihood(probs, idxs).numpy()  # N, label+seq+1
+
+        # Log and sum
         if log:
             L = np.log(L)
         if per_pos:
@@ -447,24 +473,34 @@ class LightningModel(pl.LightningModule):
             else:
                 return np.product(L, 1)  # N
 
-    def P_seqs_given_labels(self, seqs, labels, per_pos=False, log=True):
+    def P_seqs_given_labels(self, seqs, labels, per_pos=False, log=True, add_stop=True):
         """
         Args:
             seqs (list, str): Sequences as strings
             labels(list, str): Labels as strings
             log (bool): Return log likelihood
+            include_end (bool): Include the end token
 
         Returns:
             np.array of shape (N)
         """
+        # Encode sequence with labels
         idxs = self.encode(
-            seqs, labels, add_start=True, add_stop=True
-        )  # N, 0+label+seq+1
-        logits = self.forward(idxs.to(self.device), drop_label=True)  # N, 16, seq+1
-        probs = self.logits_to_probs(logits)  # N, 16, seq+1
-        L = self.probs_to_likelihood(
-            probs, idxs[:, 1 + self.label_len :]
-        ).numpy()  # N, seq+1
+            seqs, labels, add_start=True, add_stop=add_stop
+        )  # N, 0+label+seq
+
+        # Compute probabilities
+        self.eval()
+        logits = self.forward(idxs.to(self.device), drop_label=True)[
+            :, :, :-1
+        ]  # N, 16, seq
+        probs = self.logits_to_probs(logits)  # N, 16, seq
+        idxs = idxs[:, 1 + self.label_len :]  # N, seq
+
+        # Compute likelihoods
+        L = self.probs_to_likelihood(probs=probs, idxs=idxs).numpy()  # N, seq
+
+        # Log and sum
         if log:
             L = np.log(L)
         if per_pos:
@@ -628,6 +664,7 @@ class LightningModel(pl.LightningModule):
 
         # Add bases
         for _ in range(max_new_tokens):
+            self.eval()
             # Get logits
             logits_next = self.forward(idxs)[:, :, -1]  # N, 16
 

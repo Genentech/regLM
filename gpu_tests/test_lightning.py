@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 
 from reglm.lightning import LightningModel
@@ -76,14 +77,17 @@ config = {
     },
 }
 
+# Build model
+model = LightningModel(config=config, logger=None, label_len=2).to(torch.device(0))
+model.seq_len = 4
+model.eval()
 
-def test_lightningmodel():
-    # Build model
-    model = LightningModel(config=config, logger=None, label_len=2)
-    model.seq_len = 4
 
-    # Encoding
+def test_encode():
     assert torch.all(model.encode_labels("10") == torch.LongTensor([3, 2]))
+    assert torch.all(
+        model.encode_labels("10", add_start=True) == torch.LongTensor([0, 3, 2])
+    )
     assert torch.all(model.encode_seqs("ACGT") == torch.LongTensor([7, 8, 9, 10]))
     assert torch.all(
         model.encode_seqs("ACGT", add_stop=True) == torch.LongTensor([7, 8, 9, 10, 1])
@@ -92,18 +96,30 @@ def test_lightningmodel():
         model.encode("ACGT", "01") == torch.LongTensor([2, 3, 7, 8, 9, 10])
     )
     assert torch.all(
+        model.encode("ACGT", "01", add_start=True)
+        == torch.LongTensor([0, 2, 3, 7, 8, 9, 10])
+    )
+    assert torch.all(
         model.encode("ACGT", "01", add_stop=True)
         == torch.LongTensor([2, 3, 7, 8, 9, 10, 1])
     )
-
-    # Decoding
-    assert model.decode(torch.LongTensor([7, 8, 9, 10])) == ["ACGT"]
-
-    # Probabilities
-    assert torch.allclose(model.logits_to_probs(logits), probs, rtol=1e-2)
-    assert torch.allclose(
-        model.probs_to_likelihood(torch.LongTensor([2, 3, 7, 8, 9]), probs), lik
+    assert torch.all(
+        model.encode("ACGT", "01", add_start=True, add_stop=True)
+        == torch.LongTensor([0, 2, 3, 7, 8, 9, 10, 1])
     )
+
+
+def test_decode():
+    assert model.decode(torch.LongTensor([7, 8, 9, 10])) == ["ACGT"]
+    assert model.decode(torch.LongTensor([0, 7, 8, 9, 10])) == ["ACGT"]
+    assert model.decode(torch.LongTensor([7, 8, 9, 10, 1])) == ["ACGT"]
+    assert model.decode(torch.LongTensor([0, 7, 8, 9, 10, 1])) == ["ACGT"]
+    assert model.decode(torch.LongTensor([0, 7, 8, 9, 10, 1, 10])) == ["ACGT"]
+
+
+def test_prediction_1():
+    # Probs
+    assert torch.allclose(model.logits_to_probs(logits), probs, rtol=1e-2)
     fprobs = torch.Tensor([[0.14788991, 0.43449541, 0.27889908, 0.1387156]])
     assert torch.allclose(
         model.filter_base_probs(probs[:, :, 0], normalize=True), fprobs
@@ -120,10 +136,90 @@ def test_lightningmodel():
         rtol=1e-2,
     )
 
-    # Likelihoods
-    model.probs_to_likelihood
+    # Likelihood
+    assert torch.allclose(
+        model.probs_to_likelihood(probs, torch.LongTensor([[2, 3, 7, 8, 9]])), lik
+    )
 
-    # Generation
+
+def test_prediction_2():
+    # Forward pass
+    logits_01acg = model.forward(
+        torch.LongTensor([[0, 2, 3, 7, 8, 9, 1]]).to(model.device), drop_label=False
+    )
+    assert logits_01acg.shape == (1, 16, 7)
+    logits_01acg_no_label = model.forward(
+        torch.LongTensor([[0, 2, 3, 7, 8, 9, 1]]).to(model.device), drop_label=True
+    )
+    assert logits_01acg_no_label.shape == (1, 16, 5)
+    assert torch.allclose(logits_01acg_no_label, logits_01acg[:, :, 2:])
+
+    # Probs
+    probs_01acg = model.logits_to_probs(logits_01acg)  # 1, 16, 7
+    assert probs_01acg.shape == (1, 16, 7)
+    assert torch.allclose(probs_01acg, torch.nn.Softmax(1)(logits_01acg))
+
+    # Likelihood
+    lik_01acg = (
+        torch.cat(
+            [
+                probs_01acg[:, 2, 0],
+                probs_01acg[:, 3, 1],
+                probs_01acg[:, 7, 2],
+                probs_01acg[:, 8, 3],
+                probs_01acg[:, 9, 4],
+                probs_01acg[:, 1, 5],
+            ]
+        )
+        .cpu()
+        .detach()
+        .unsqueeze(0)
+    )  # 1, 6
+    assert lik_01acg.shape == (1, 6)
+    assert torch.allclose(
+        model.probs_to_likelihood(
+            probs_01acg[:, :, :-1].to(model.device),
+            torch.LongTensor([[2, 3, 7, 8, 9, 1]]),
+        ),
+        lik_01acg,
+    )
+
+    log_lik_01acg = np.log(lik_01acg.numpy())
+    assert log_lik_01acg.shape == (1, 6)
+    assert np.allclose(
+        model.P_seqs(seqs=["ACG"], labels=["01"], per_pos=True, log=True), log_lik_01acg
+    )
+    assert np.allclose(
+        model.P_seqs(seqs=["ACG"], labels=["01"], per_pos=False, log=True),
+        log_lik_01acg.sum(1),
+    )
+    assert np.allclose(
+        model.P_seqs_given_labels(
+            seqs=["ACG"], labels=["01"], per_pos=True, log=True, add_stop=True
+        ),
+        log_lik_01acg[:, 2:],
+    )
+    assert np.allclose(
+        model.P_seqs_given_labels(
+            seqs=["ACG"], labels=["01"], per_pos=False, log=True, add_stop=True
+        ),
+        log_lik_01acg[:, 2:].sum(1),
+    )
+    assert np.allclose(
+        model.P_seqs_given_labels(
+            seqs=["ACG"], labels=["01"], per_pos=True, log=True, add_stop=False
+        ),
+        log_lik_01acg[:, 2:-1],
+    )
+    assert np.allclose(
+        model.P_seqs_given_labels(
+            seqs=["ACG"], labels=["01"], per_pos=False, log=True, add_stop=False
+        ),
+        log_lik_01acg[:, 2:-1].sum(1),
+    )
+
+
+def test_generation():
     rng = torch.Generator()
     rng.manual_seed(0)
     assert model.logits_to_idxs(logits[:, :, 0], random_state=rng) == torch.tensor(9)

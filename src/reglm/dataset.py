@@ -4,7 +4,7 @@ from torch.utils.data import Dataset
 
 
 class CharDataset(Dataset):
-    def __init__(self, seqs, labels, seq_len=None, rc=False, seed=0):
+    def __init__(self, seqs, labels, seq_len=None):
         """
         A dataset class to produce tokenized sequences for training regLM.
 
@@ -27,8 +27,6 @@ class CharDataset(Dataset):
         # Store data
         self.seqs = seqs
         self.labels = labels
-        self.rng = np.random.RandomState(seed)
-        self.rc = rc
 
         # maximum sequence length
         self.seq_len = seq_len or np.max([len(seq) for seq in self.seqs])
@@ -59,13 +57,6 @@ class CharDataset(Dataset):
             "G": 9,
             "T": 10,
             "N": 11,
-        }
-        self.rc_hash = {
-            "A": "T",
-            "T": "A",
-            "C": "G",
-            "G": "C",
-            "N": "N",
         }
         self.label_itos = {v: k for k, v in self.label_stoi.items()}
         self.base_itos = {v: k for k, v in self.base_stoi.items()}
@@ -137,10 +128,6 @@ class CharDataset(Dataset):
         """
         # Get sequence
         seq = self.seqs[idx]
-
-        # Reverse complement sequence if required
-        if self.rc and self.rng.randint(2):
-            seq = "".join([self.rc_hash[base] for base in reversed(seq)])
 
         # Encode sequence
         seq = self.encode_seq(seq)

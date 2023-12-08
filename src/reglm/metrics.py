@@ -8,7 +8,7 @@ def compute_accuracy(model, seqs, shuffle_labels=False):
     if shuffle_labels:
         labels = seqs.label.sample(len(seqs))
     labels = labels.tolist()
-    ds = reglm.dataset.CharDataset(seqs=seqs.Sequence.tolist(), labels=labels, rc=False)
+    ds = reglm.dataset.CharDataset(seqs=seqs.Sequence.tolist(), labels=labels)
     acc = model.compute_accuracy_on_dataset(ds, batch_size=64, num_workers=8)
     if shuffle_labels:
         seqs["acc_shuf"] = acc

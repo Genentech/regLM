@@ -1,4 +1,4 @@
-bpnetlite < 0.6.0
+bpnet-lite < 0.6.0
 captum == 0.5.0
 enformer_pytorch
 furo==2021.11.16

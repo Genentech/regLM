@@ -5,10 +5,9 @@ from reglm.dataset import CharDataset
 
 
 def test_chardataset():
-    ds = CharDataset(["AAA", "AAC"], ["00", "01"], seq_len=4, rc=True, seed=0)
+    ds = CharDataset(["AAA", "AAC"], ["00", "01"], seq_len=4, seed=0)
     assert np.all(ds.seqs == ["AAA", "AAC"])
     assert np.all(ds.labels == ["00", "01"])
-    assert ds.rc
     assert ds.seq_len == 4
     assert ds.label_len == 2
     assert ds.unique_labels == {"0", "1"}
@@ -20,7 +19,3 @@ def test_chardataset():
     x, y = ds[0]
     assert torch.all(x == torch.LongTensor([0, 2, 2, 7, 7, 7, 0]))
     assert torch.all(y == torch.LongTensor([7, 7, 7, 1, 0]))
-
-    x, y = ds[1]
-    assert torch.all(x == torch.LongTensor([0, 2, 3, 9, 10, 10, 0]))
-    assert torch.all(y == torch.LongTensor([9, 10, 10, 1, 0]))

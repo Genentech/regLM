@@ -149,7 +149,7 @@ class EnformerModel(pl.LightningModule):
         return loss
 
     def validation_epoch_end(self, output):
-        print("val_loss", torch.mean(torch.Tensor(output)).item())
+        print("\nval_loss", torch.mean(torch.Tensor(output)).item())
 
     def configure_optimizers(self):
         return optim.Adam(self.parameters(), lr=self.lr)

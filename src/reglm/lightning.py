@@ -655,7 +655,7 @@ class LightningModel(pl.LightningModule):
             max_new_tokens = self.seq_len
 
         # Encode labels
-        idxs = self.encode_labels(labels).to(self.device)  # N, L+1
+        idxs = self.encode_labels(labels, add_start=True).to(self.device)  # N, label_len+1
 
         # Get random state
         rng = torch.Generator(device=self.device)
@@ -665,6 +665,7 @@ class LightningModel(pl.LightningModule):
         # Add bases
         for _ in range(max_new_tokens):
             self.eval()
+
             # Get logits
             logits_next = self.forward(idxs)[:, :, -1]  # N, 16
 

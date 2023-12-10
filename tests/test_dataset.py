@@ -5,7 +5,7 @@ from reglm.dataset import CharDataset
 
 
 def test_chardataset():
-    ds = CharDataset(["AAA", "AAC"], ["00", "01"], seq_len=4, seed=0)
+    ds = CharDataset(["AAA", "AAC"], ["00", "01"], seq_len=4)
     assert np.all(ds.seqs == ["AAA", "AAC"])
     assert np.all(ds.labels == ["00", "01"])
     assert ds.seq_len == 4

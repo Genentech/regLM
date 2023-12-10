@@ -687,7 +687,7 @@ class LightningModel(pl.LightningModule):
             # Add new indices
             idxs = torch.cat((idxs, idxs_next.unsqueeze(1)), dim=1)
 
-        return self.decode(idxs)
+        return self.decode(idxs[:, self.label_len + 1 :])
 
     def on_save_checkpoint(self, checkpoint):
         checkpoint["hyper_parameters"]["seq_len"] = self.seq_len

@@ -223,3 +223,6 @@ def test_generation():
     rng = torch.Generator()
     rng.manual_seed(0)
     assert model.logits_to_idxs(logits[:, :, 0], random_state=rng) == torch.tensor(9)
+    gen = model.generate(labels=["01", "01"], max_new_tokens=3)
+    assert len(gen) == 2
+    assert len(gen[0]) == len(gen[1]) == 3

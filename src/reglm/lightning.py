@@ -655,7 +655,9 @@ class LightningModel(pl.LightningModule):
             max_new_tokens = self.seq_len
 
         # Encode labels
-        idxs = self.encode_labels(labels, add_start=True).to(self.device)  # N, label_len+1
+        idxs = self.encode_labels(labels, add_start=True).to(
+            self.device
+        )  # N, label_len+1
 
         # Get random state
         rng = torch.Generator(device=self.device)
@@ -685,7 +687,7 @@ class LightningModel(pl.LightningModule):
             # Add new indices
             idxs = torch.cat((idxs, idxs_next.unsqueeze(1)), dim=1)
 
-        return self.decode(idxs[:, self.label_len :])
+        return self.decode(idxs)
 
     def on_save_checkpoint(self, checkpoint):
         checkpoint["hyper_parameters"]["seq_len"] = self.seq_len

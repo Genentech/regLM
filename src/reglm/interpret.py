@@ -1,6 +1,125 @@
 import numpy as np
 import pandas as pd
 
+from reglm.regression import SeqDataset
+from reglm.utils import seqs_to_idxs
+
+
+def ISM_at_pos(seq, pos, drop_ref=True):
+    """
+    Perform in-silico mutagenesis at a single position in the sequence.
+
+    Args:
+        seq (str): DNA sequence
+        pos (int): Position to mutate
+        drop_ref (bool): If True, the original base at the mutation position is dropped.
+
+    Returns:
+        outputs (list): List of mutated DNA sequences
+    """
+    outputs = []
+    alt_bases = ["A", "C", "G", "T"]
+
+    if drop_ref:
+        alt_bases.remove(seq[pos])
+
+    for base in alt_bases:
+        mutated_seq = list(seq)
+        mutated_seq[pos] = base
+        outputs.append("".join(mutated_seq))
+
+    return outputs
+
+
+def ISM(seq, drop_ref=True):
+    """
+    Perform in-silico mutagenesis of a DNA sequence.
+
+    Args:
+        seq (str): DNA sequence
+        drop_ref (bool): If True, the original base at the mutation position is dropped.
+
+    Returns:
+        List of mutated DNA sequences
+    """
+    return list(
+        np.concatenate(
+            [ISM_at_pos(seq, pos, drop_ref=drop_ref) for pos in range(len(seq))]
+        )
+    )
+
+
+def ISM_predict(seqs, model, seq_len=None, batch_size=512, device=0):
+    """
+    Perform in-silico mutagenesis of DNA sequences and make predictions with a
+    regression model to get per-base importance scores
+
+    Args:
+        seqs (list): List of DNA sequences of equal length
+        model (pl.LightningModule): regression model
+
+    Returns:
+        np.array of shape (number of sequences x length of sequences) containing
+        per-base importance scores
+    """
+
+    # Get sequence length
+    actual_seq_lens = [len(seq) for seq in seqs]
+    assert (
+        len(set(actual_seq_lens)) == 1
+    ), "This function currently requires all sequences to have equal length"
+    actual_seq_len = actual_seq_lens[0]
+
+    # Perform ISM
+    mutated_seqs = np.concatenate([ISM(seq, drop_ref=False) for seq in seqs])  # N*4
+
+    # Get predictions for all mutated sequences
+    dataset = SeqDataset(mutated_seqs, seq_len=seq_len)
+    preds = model.predict_on_dataset(
+        dataset,
+        device=device,
+        batch_size=batch_size,
+    )  # Nx4xseq_len, n_tasks
+    if preds.ndim == 1:
+        preds = np.expand_dims(preds, 1)
+    assert (preds.ndim == 2) and (
+        preds.shape[0] == len(seqs) * 4 * actual_seq_len
+    ), preds.shape
+
+    # Reshape
+    preds = preds.reshape(
+        len(seqs), 4 * actual_seq_len, preds.shape[-1]
+    )  # N, 4*seq_len, n_tasks
+
+    preds = preds.reshape(
+        len(seqs), actual_seq_len, 4, preds.shape[-1]
+    )  # N, seq_len, 4, n_tasks
+
+    # Make empty array for final scores
+    scores = np.zeros(np.delete(preds.shape, 2))  # N, seq_len, n_tasks
+
+    # Convert original sequences to indices
+    idxs = seqs_to_idxs(seqs)  # N, seq_len
+
+    # Take the log-ratio of the predicted scores relative to the original sequence
+    for seq_idx in range(scores.shape[0]):
+        for pos_idx in range(scores.shape[1]):
+            # Get predictions at true and mutated bases
+            true_idx = idxs[seq_idx, pos_idx]
+            mutated_idxs = [idx for idx in range(4) if idx != true_idx]
+            true_preds = preds[seq_idx, pos_idx, true_idx]  # n_tasks
+            mutated_preds = preds[seq_idx, pos_idx, mutated_idxs]  # 3, n_tasks
+
+            # Calculate average log2 ratio caused by mutation
+            score = -np.log2(mutated_preds / np.expand_dims(true_preds, 0)).mean(
+                0
+            )  # n_tasks
+
+            # Insert
+            scores[seq_idx, pos_idx] = score
+
+    return scores.squeeze()  # N, seq_len, n_tasks
+
 
 def generate_random_sequences(n=1, seq_len=1024, seed=0):
     """

@@ -487,14 +487,14 @@ class LightningModel(pl.LightningModule):
         # Encode sequence with labels
         idxs = self.encode(
             seqs, labels, add_start=True, add_stop=add_stop
-        )  # N, 0+label+seq
+        )  # N, 0+label+seq OR N, 0+label+seq+1
 
         # Compute probabilities
         self.eval()
         logits = self.forward(idxs.to(self.device), drop_label=True)[
             :, :, :-1
-        ]  # N, 16, seq
-        probs = self.logits_to_probs(logits)  # N, 16, seq
+        ]  # N, 16, seq OR N, 16, seq+1
+        probs = self.logits_to_probs(logits)  # N, 16, seq OR N, 16, seq+1
         idxs = idxs[:, 1 + self.label_len :]  # N, seq
 
         # Compute likelihoods

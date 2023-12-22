@@ -105,3 +105,54 @@ def split_label_equal(df, n_val, n_test):
     )
     train_df = train_df.loc[~train_df.index.isin(test_df), :]
     return train_df, val_df, test_df
+
+
+def seqs_to_idxs(seqs):
+    base_to_idx = {
+        "A": 0,
+        "C": 1,
+        "G": 2,
+        "T": 3,
+    }
+    return np.array([[base_to_idx[base] for base in seq] for seq in seqs])
+
+
+def scores_to_matrix(scores, seqs):
+    """
+    Convert per-base scores to a N x seq_len x 4 numpy array
+    """
+    # Encode sequences
+    idxs = seqs_to_idxs(seqs)  # N, seq_len
+
+    # Create empty array
+    matrix = np.zeros((idxs.shape[0], idxs.shape[1], 4))  # N, seq_len, 4
+
+    # Fill in empty matrix with scores
+    for seq_idx in range(idxs.shape[0]):
+        for pos in range(idxs.shape[1]):
+            true_base_idx = idxs[seq_idx, pos]
+            true_base_score = scores[seq_idx, pos].tolist()
+            matrix[seq_idx, pos, true_base_idx] = true_base_score
+
+    return matrix
+
+
+def matrix_to_scores(matrix, seqs):
+    """
+    Convert a 2D tensor of shape N x 4 to a 1-D array of shape N containing
+    scores for the actual base
+    """
+    # Encode sequences
+    idxs = seqs_to_idxs(seqs)
+
+    # Create empty array
+    scores = np.zeros(idxs.shape)
+
+    # Fill the empty array with scores of the true base
+    for seq_idx in range(idxs.shape[0]):
+        for pos in range(idxs.shape[1]):
+            true_base_idx = idxs[seq_idx, pos]
+            true_base_score = matrix[seq_idx, pos, true_base_idx].tolist()
+            scores[seq_idx, pos] = true_base_score
+
+    return scores

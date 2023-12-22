@@ -2,8 +2,6 @@ import numpy as np
 import pandas as pd
 import pytorch_lightning as pl
 import torch
-from bpnetlite.attributions import dinucleotide_shuffle, hypothetical_attributions
-from captum.attr import DeepLiftShap
 from enformer_pytorch import Enformer
 from enformer_pytorch.data import str_to_one_hot
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -23,11 +21,10 @@ class SeqDataset(Dataset):
             on the right to reach this length.
     """
 
-    def __init__(self, seqs, seq_len):
+    def __init__(self, seqs, seq_len=None):
         super().__init__()
 
         self.is_labeled = False
-        self.seq_len = seq_len
 
         # Add seqs
         if isinstance(seqs, pd.DataFrame):
@@ -38,6 +35,9 @@ class SeqDataset(Dataset):
             self.is_labeled = True
         else:
             self.seqs = seqs
+
+        # Add max sequence length
+        self.seq_len = seq_len or np.max([len(seq) for seq in self.seqs])
 
     def __len__(self):
         return len(self.seqs)
@@ -230,30 +230,3 @@ class EnformerModel(pl.LightningModule):
             .numpy()
             .squeeze()
         )
-
-
-def get_attributions(model, seqs, device=0, n_shuffles=20, seed=None, task=0):
-    """
-    Get per-nucleotide attribution scores using DeepSHAP.
-    """
-    inputs = str_to_one_hot(seqs)
-    attributer = DeepLiftShap(model.to(device))
-
-    attributions = []
-    with torch.no_grad():
-        for i in range(len(inputs)):
-            X_ = inputs[i : i + 1]
-            reference = dinucleotide_shuffle(
-                X_[0], n_shuffles=n_shuffles, random_state=seed
-            ).to(device)
-            X_ = X_.to(device)
-            attr = attributer.attribute(
-                X_,
-                reference,
-                target=task,
-                custom_attribution_func=hypothetical_attributions,
-            )
-            attr = attr * X_
-            attributions.append(attr.cpu())
-
-    return torch.cat(attributions)  # N, 4, seq_len

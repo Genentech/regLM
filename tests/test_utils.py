@@ -1,7 +1,13 @@
 import numpy as np
 import pandas as pd
 
-from reglm.utils import get_labels, get_percentiles, tokenize
+from reglm.utils import (
+    get_labels,
+    get_percentiles,
+    matrix_to_scores,
+    scores_to_matrix,
+    tokenize,
+)
 
 
 def test_get_percentiles():
@@ -49,4 +55,23 @@ def test_tokenize():
             n_bins=False,
         )["label"].tolist()
         == ["02", "01", "01", "00", "00", "00", "00", "00", "00", "10", "10", "20"]
+    )
+
+
+def test_scores_to_matrix():
+    assert np.allclose(
+        scores_to_matrix(scores=np.array([[1, 4], [2, 6]]), seqs=["AA", "CT"]),
+        np.array([[[1, 0, 0, 0], [4, 0, 0, 0]], [[0, 2, 0, 0], [0, 0, 0, 6]]]),
+    )
+
+
+def test_matrix_to_scores():
+    assert np.allclose(
+        matrix_to_scores(
+            matrix=np.array(
+                [[[1, 0, 0, 0], [4, 0, 0, 0]], [[0, 2, 0, 0], [0, 0, 0, 6]]]
+            ),
+            seqs=["AA", "CT"],
+        ),
+        np.array([[1, 4], [2, 6]]),
     )

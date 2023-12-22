@@ -37,38 +37,39 @@ def evolve(
     Returns:
         df (pd.DataFrame): Dataframe containing evolution results
     """
-
-    df = pd.DataFrame(
-        {
-            "Sequence": start_seqs,
-            "iter": 1,
-            "start_seq": range(len(start_seqs)),
-        }
-    )
-
-    # Calculate sequence likelihood
-    if language_model is not None:
-        start_likelihoods = language_model.P_seqs_given_labels(
-            start_seqs, label * len(start_seqs), add_stop=True, log=True, per_pos=False
-        )
-        df["likelihood"] = start_likelihoods
+    df = pd.DataFrame()
 
     # Iterate
-    for i in range(2, max_iter + 1):
-        print(f"Iteration: {i}")
+    for i in range(max_iter + 1):
+        if i == 0:
+            # starting sequences
+            curr_df = pd.DataFrame(
+                {
+                    "Sequence": start_seqs,
+                    "iter": i,
+                    "start_seq": range(len(start_seqs)),
+                    "best_in_iter": [True] * len(start_seqs),
+                }
+            )
 
-        # ISM
-        new_seqs = np.concatenate([ISM(seq) for seq in start_seqs])
-        start_seq_lens = [len(seq) for seq in start_seqs]
-        curr_df = pd.DataFrame(
-            {
-                "Sequence": new_seqs,
-                "start_seq": np.concatenate(
-                    [[s_idx] * s_len * 3 for s_idx, s_len in enumerate(start_seq_lens)]
-                ),
-                "iter": i,
-            }
-        )
+        elif i > 0:
+            print(f"Iteration: {i}")
+
+            # ISM
+            new_seqs = np.concatenate([ISM(seq, drop_ref=True) for seq in start_seqs])
+            start_seq_lens = [len(seq) for seq in start_seqs]
+            curr_df = pd.DataFrame(
+                {
+                    "Sequence": new_seqs,
+                    "start_seq": np.concatenate(
+                        [
+                            [s_idx] * s_len * 3
+                            for s_idx, s_len in enumerate(start_seq_lens)
+                        ]
+                    ),
+                    "iter": i,
+                }
+            )
 
         if language_model is not None:
             # Calculate likelihood
@@ -82,34 +83,40 @@ def evolve(
                         per_pos=False,
                     )
                     for batch in np.split(
-                        new_seqs, list(range(1000, len(new_seqs), 1000))
+                        curr_df.Sequence.tolist(), list(range(1000, len(curr_df), 1000))
                     )
                 ]
             )
 
-            # Filter
-            curr_df["prev_likelihood"] = curr_df.start_seq.apply(
-                lambda x: start_likelihoods[x]
-            )
-            curr_df = curr_df[curr_df.likelihood > (curr_df.prev_likelihood - tol)]
+            if i > 0:
+                # Filter
+                curr_df["prev_likelihood"] = curr_df.start_seq.apply(
+                    lambda x: start_likelihoods[x]
+                )
+                curr_df = curr_df[curr_df.likelihood > (curr_df.prev_likelihood - tol)]
 
         # Predict with regression model
-        ds = SeqDataset(new_seqs, seq_len=seq_len)
+        ds = SeqDataset(curr_df.Sequence.tolist(), seq_len=seq_len)
         preds = regression_model.predict_on_dataset(
             ds, batch_size=batch_size, device=device, num_workers=num_workers
         )
 
         # Get mean prediction or task specificity
-        if specific is None:
+        if (specific is None) and (preds.ndim == 2):
             preds = preds.mean(1)
         else:
             non_specific = [x for x in range(preds.shape[1]) if x != specific]
             preds = preds[:, non_specific].mean(1) - preds[:, specific].mean(1)
-        curr_df["pred"] = preds
-        curr_df["best_in_iter"] = False
+        curr_df["pred"] = [x for x in preds]
 
-        # Get best sequences to start next iteration
-        curr_df.loc[curr_df.groupby("start_seq").pred.idxmax(), "best_in_iter"] = True
+        if i > 0:
+            # Get best sequence from each starting sequence
+            curr_df["best_in_iter"] = [False] * len(curr_df)
+            curr_df.loc[
+                curr_df.groupby("start_seq").pred.idxmax(), "best_in_iter"
+            ] = True
+
+        # Collect sequences to start the next iteration
         start_seqs = curr_df.loc[curr_df.best_in_iter, "Sequence"].tolist()
         if language_model is not None:
             start_likelihoods = curr_df.loc[curr_df.best_in_iter, "likelihood"].tolist()

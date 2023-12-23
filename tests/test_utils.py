@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 from reglm.utils import (
-    get_labels,
+    get_label_tokens,
     get_percentiles,
     matrix_to_scores,
     scores_to_matrix,
@@ -20,9 +20,9 @@ def test_get_percentiles():
     )
 
 
-def test_get_labels():
+def test_get_label_tokens():
     assert np.all(
-        get_labels(
+        get_label_tokens(
             [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], percentiles=[2.75, 5.5, 8.25]
         )
         == ["0", "0", "0", "1", "1", "1", "2", "2", "2", "3", "3", "3"]

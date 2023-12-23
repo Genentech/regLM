@@ -15,8 +15,6 @@ class CharDataset(Dataset):
             seqs (list): List of sequences.
             labels (list): List of labels as strings
             seq_len (int): Maximum sequence length
-            rc (bool): Augment sequence by reverse complementation
-            seed (int): Random seed
         """
         # Check
         assert len(seqs) == len(labels), "seqs and labels should have equal length"

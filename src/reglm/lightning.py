@@ -2,17 +2,26 @@ import itertools
 import json
 import os
 import sys
-from datetime import datetime
 
 import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.loggers import CSVLogger, WandbLogger
+from pytorch_lightning.loggers import CSVLogger
 from torch import optim
-from torch.utils.data import DataLoader, WeightedRandomSampler
+from torch.utils.data import DataLoader
 from torchmetrics import Accuracy
+
+HYENADNA_MODEL_NAMES = [
+    "hyenadna-tiny-16k-seqlen-d128",
+    "hyenadna-large-1m-seqlen",
+    "hyenadna-medium-160k-seqlen",
+    "hyenadna-medium-450k-seqlen",
+    "hyenadna-small-32k-seqlen",
+    "hyenadna-tiny-1k-seqlen",
+    "hyenadna-tiny-1k-seqlen-d256",
+]
 
 
 def load_pretrained_model(
@@ -20,19 +29,23 @@ def load_pretrained_model(
     model="hyenadna-tiny-1k-seqlen",
     hyenadna_path="/code/hyena-dna",
 ):
+    """
+    Load a pretrained hyenaDNA foundation model.
+
+    Args:
+        ckpt_dir (str): Path to directory containing downloaded model checkpoints,
+            or in which they should be downloaded
+        model (str): Name of model to load
+        hyenadna_path (str): Path to cloned hyenaDNA repository
+
+    Returns:
+        model (nn.Module): pre-trained HyenaDNA foundation model
+    """
     sys.path.append(hyenadna_path)
     from src.models.sequence.long_conv_lm import ConvLMHeadModel
 
     # Check model name
-    assert model in [
-        "hyenadna-tiny-16k-seqlen-d128",
-        "hyenadna-large-1m-seqlen",
-        "hyenadna-medium-160k-seqlen",
-        "hyenadna-medium-450k-seqlen",
-        "hyenadna-small-32k-seqlen",
-        "hyenadna-tiny-1k-seqlen",
-        "hyenadna-tiny-1k-seqlen-d256",
-    ]
+    assert model in HYENADNA_MODEL_NAMES
 
     # Make directory if needed
     if not os.path.exists(ckpt_dir):
@@ -70,19 +83,30 @@ def load_pretrained_model(
 
 
 class LightningModel(pl.LightningModule):
+    """
+    LightningModule class to train and use autoregressive token-conditioned
+    regLM language models.
+
+    Args:
+        config (dict): Config dictionary containing model parameters
+        ckpt_dir (str): Path to directory containing downloaded model checkpoints,
+            or in which they should be downloaded
+        hyenadna_path (str): Path to cloned hyenaDNA repository
+        save_dir (str): Directory to save model checkpoints and logs
+        lr (float): Learning rate
+        label_len (int): Number of label tokens preceding each DNA sequence
+    """
+
     def __init__(
         self,
         config=None,
         ckpt_dir=None,
-        logger=None,
+        hyenadna_path="/code/hyena-dna",
         save_dir=".",
         lr=1e-4,
         label_len=None,
-        hyenadna_path="/code/hyena-dna",
     ):
         super().__init__()
-        sys.path.append(hyenadna_path)
-        from src.models.sequence.long_conv_lm import ConvLMHeadModel
 
         self.save_dir = save_dir
         self.label_len = label_len
@@ -94,16 +118,17 @@ class LightningModel(pl.LightningModule):
             self.model = load_pretrained_model(ckpt_dir, hyenadna_path=hyenadna_path)
         elif config is not None:
             sys.path.append(hyenadna_path)
+            from src.models.sequence.long_conv_lm import ConvLMHeadModel
+
             self.model = ConvLMHeadModel(**config)
         else:
             raise ValueError("either config or ckpt_dir must be provided.")
-        n_params = sum(p.numel() for p in self.model.parameters())
-        print("number of parameters: %.2fM" % (n_params / 1e6,))
 
-        # Logger
-        self.logger_type = logger
+        # Print number of model parameters
+        self.n_params = sum(p.numel() for p in self.model.parameters())
+        print("number of parameters: %.2fM" % (self.n_params / 1e6,))
 
-        # Metrics
+        # Metrics: accuracy
         self.train_acc = Accuracy(task="multiclass", num_classes=16, ignore_index=0)
         self.val_acc = Accuracy(task="multiclass", num_classes=16, ignore_index=0)
 
@@ -134,14 +159,17 @@ class LightningModel(pl.LightningModule):
         # Trailing zeros in the label will be ignored in calculating the loss
         self.loss = lambda logits, y: F.cross_entropy(logits, y, ignore_index=0)
 
-    def forward(self, x, drop_label=True):
+    def forward(self, x, drop_label=True, logits=False):
         """
         Args:
             x (torch.tensor, dtype torch.float32): tensor of shape (N, L)
 
         Returns:
             logits (torch.tensor, dtype torch.float32): tensor of shape
-                (N, 16, L - label_len - 1)
+                (N, 16, L - label_len) if drop_label is True,
+                or (N, 16, L) if drop_label is False.
+                Note that the prediction for the END token (1) as well as the
+                hypothetical position after it will be included.
         """
         logits = self.model(x)[0].logits.swapaxes(
             1, 2
@@ -151,11 +179,17 @@ class LightningModel(pl.LightningModule):
         if drop_label:
             logits = logits[:, :, self.label_len :]  # N, seq + end + trailing
 
-        return logits
+        # Return logits or normalized probabilities
+        if logits:
+            return logits
+        else:
+            return logits.softmax(1)
 
     def training_step(self, batch, batch_idx):
         x, y = batch
-        logits = self.forward(x, drop_label=True)  # N, seq + end + trailing
+        logits = self.forward(
+            x, drop_label=True, logits=True
+        )  # N, seq + end + trailing
         loss = self.loss(logits, y)  # Loss will be calculated over seq + end positions
         self.log(
             "train_loss",
@@ -169,7 +203,9 @@ class LightningModel(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
-        logits = self.forward(x, drop_label=True)  # N, seq + end + trailing
+        logits = self.forward(
+            x, drop_label=True, logits=True
+        )  # N, seq + end + trailing
         loss = self.loss(logits, y)  # Loss will be calculated over seq + end positions
         self.val_acc.update(logits.argmax(1), y)
         self.log(
@@ -200,8 +236,23 @@ class LightningModel(pl.LightningModule):
         device=0,
         max_epochs=3,
         val_check_interval=5000,
-        weights=None,
     ):
+        """
+        Train regLM model.
+
+        Args:
+            train_dataset (CharDataset): Training dataset
+            val_dataset (CharDataset): Validation dataset
+            batch_size (int): Batch size
+            num_workers (int): Number of workers for training
+            device (int): GPU index
+            max_epochs (int): Number of epochs to train
+            val_check_interval (int): Number of steps after which to
+                check validation loss
+
+        Returns:
+            pl.Trainer object
+        """
         torch.set_float32_matmul_precision("medium")
 
         # Save dataset params
@@ -210,16 +261,7 @@ class LightningModel(pl.LightningModule):
         self.unique_labels = train_dataset.unique_labels
 
         # Logger
-        if self.logger_type == "wandb":
-            logger = WandbLogger(
-                name=datetime.now().strftime("%Y_%d_%m_%H_%M"),
-                log_model=True,
-                save_dir=self.save_dir,
-            )
-        elif self.logger_type == "csv":
-            logger = CSVLogger(self.save_dir)
-        else:
-            logger = None
+        logger = CSVLogger(self.save_dir)
 
         # Set up trainer
         trainer = pl.Trainer(
@@ -233,26 +275,12 @@ class LightningModel(pl.LightningModule):
         )
 
         # Make dataloaders
-        if weights is None:
-            train_data = DataLoader(
-                train_dataset,
-                batch_size=batch_size,
-                shuffle=True,
-                num_workers=num_workers,
-            )
-        else:
-            sampler = WeightedRandomSampler(
-                weights=weights,
-                num_samples=len(weights),
-                replacement=True,
-            )
-            train_data = DataLoader(
-                train_dataset,
-                batch_size=batch_size,
-                shuffle=False,
-                num_workers=num_workers,
-                sampler=sampler,
-            )
+        train_data = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=num_workers,
+        )
 
         val_data = DataLoader(
             val_dataset,
@@ -276,47 +304,68 @@ class LightningModel(pl.LightningModule):
         num_workers=8,
     ):
         """
-        Return per-example accuracy
+        Perform inference on a dataset and return per-example accuracy
         Note: this will include the accuracy of predicting the END token (1)
-        """
 
+        Args:
+            dataset (CharDataset): Inference dataset
+            batch_size (int): Batch size for inference
+            num_workers (int): Number of workers for inference
+
+        Returns: List of booleans indicating whether the predicted base at each position
+        was equal to the true label or not.
+        """
+        # Make dataloader
         dl = DataLoader(
             dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers
         )
 
+        # Empty lists to hold predictions
         y_hat = []
         y = []
 
         self.eval()
         for batch in iter(dl):
             x = batch[0].to(self.device)
-            logits = self.forward(
+            probs = self.forward(
                 x, drop_label=True
             ).squeeze()  # N, 16, seq+end+trailing
-            y_hat.append(logits.argmax(1).cpu().detach())  # N, seq+end+trailing
+            y_hat.append(probs.argmax(1).cpu().detach())  # N, seq+end+trailing
             y.append(batch[1].detach().squeeze())  # N, seq+end+trailing zeros
 
+        # Stack batched predictions
         y_hat = torch.vstack(y_hat).numpy()  # N, L
         y = torch.vstack(y).numpy()  # N, L
 
+        # Compare predicted base and true label where the true label is not 0.
+        # Hence, this computation will include the END token (1) but not any
+        # hypothetical bases / trailing zeros.
         is_non_zero = y != 0
         is_equal = y_hat == y
+
+        # Return booleans
         return [e[n] for e, n in zip(is_equal, is_non_zero)]
 
     def encode_labels(self, labels, add_start=False):
         """
+        Encode labels as a list of indices for inference
+
         Args:
-            label (list, str): Strings of label tokens
+            labels (list, str): Strings of label tokens
             add_start (bool): Whether to add the start token (0)
 
         Returns:
-            (torch.LongTensor): tensor of shape (N, L)
+            idxs (torch.LongTensor): tensor of shape (N, L)
         """
         if isinstance(labels, str):
             labels = [labels]
+
+        # Convert label to indices
         idxs = torch.LongTensor(
             [[self.label_stoi[tok] for tok in label] for label in labels]
         )  # N, label_len
+
+        # Add start token
         if add_start:
             idxs = torch.cat(
                 (torch.LongTensor([[0]] * idxs.shape[0]), idxs), axis=1
@@ -325,27 +374,36 @@ class LightningModel(pl.LightningModule):
 
     def encode_seqs(self, seqs, add_stop=False):
         """
+        Encode sequences as lists of indices for inference
+
         Args:
-            seqs (list, str): Strings of base tokens
-            add_stop (bool): Add an end token (1) after the sequence
+            seqs (list, str): DNA sequence(s) as string or list of strings
+            add_stop (bool): Whether to add an end token (1) after each sequence
 
         Returns:
-            idxs (torch.LongTensor): tensor of shape (N, L) or (N, L+1)
+            idxs (torch.LongTensor): tensor of shape (N, L) if add_stop is False
+            or (N, L+1) if add_stop is True.
         """
         if isinstance(seqs, str):
             seqs = [seqs]
 
+        # Convert sequences to indices
         idxs = torch.LongTensor(
             [[self.base_stoi[tok] for tok in seq] for seq in seqs]
         )  # N, seq_len
+
+        # Add END token
         if add_stop:
             idxs = torch.cat(
                 (idxs, torch.LongTensor([[1]] * idxs.shape[0])), axis=1
             )  # N, seq_len+1
+
         return idxs
 
     def encode(self, seqs, labels, add_start=False, add_stop=False):
         """
+        Encode sequences and labels as indices for mdoel inference.
+
         Args:
             seqs (list, str): Strings of base tokens
             label (list, str): Strings of label tokens
@@ -365,8 +423,10 @@ class LightningModel(pl.LightningModule):
 
     def decode(self, idxs):
         """
+        Decodes indices into DNA sequences
+
         Args:
-            idxs (torch.LongTensor, np.array): tensor or array of shape (N, L)
+            idxs (torch.LongTensor): tensor or array of shape (N, L)
 
         Returns:
             seqs (list): list of strings
@@ -374,8 +434,7 @@ class LightningModel(pl.LightningModule):
         if idxs.dim() == 1:  # L
             idxs = idxs.unsqueeze(0)  # 1, L
 
-        if isinstance(idxs, torch.Tensor):
-            idxs = idxs.cpu().detach().numpy()
+        idxs = idxs.cpu().detach().numpy()
 
         # Create empty list
         seqs = []
@@ -403,35 +462,29 @@ class LightningModel(pl.LightningModule):
             seqs.append("".join(curr_seq))
         return seqs
 
-    def logits_to_probs(self, logits):
-        """
-        Args:
-            logits (torch.tensor, dtype torch.float32): tensor of shape (N, 16, L)
-                or (N, 16)
-
-        Returns:
-            tensor of shape (N, 16, L) or (N, 16)
-        """
-        assert logits.dim() in [2, 3]
-        assert logits.shape[1] == 16
-        return logits.softmax(1)
-
     def probs_to_likelihood(self, probs, idxs):
         """
+        Compute the likelihood of each base in a sequence given model predictions
+        on the sequence.
+
         Args:
             probs (torch.FloatTensor): tensor of shape (N, 16, L)
             idxs (torch.LongTensor): tensor of shape (N, L)
 
         Returns:
-            tensor of shape (N, L)
+            tensor of shape (N, L) containing the probabilities of real bases
         """
+        # Check shapes
         assert probs.dim() == 3, probs.shape
         assert probs.shape[1] == 16, probs.shape
         assert idxs.dim() == 2, idxs.shape
         assert idxs.shape[0] == probs.shape[0], (idxs.shape, probs.shape)
         assert idxs.shape[1] == probs.shape[2], (idxs.shape, probs.shape)
 
+        # Construct mask indicating positions of actual bases
         mask = F.one_hot(idxs, num_classes=16).type(torch.bool)
+
+        # Return probabilities at real bases
         return torch.masked_select(probs.swapaxes(1, 2).cpu().detach(), mask).reshape(
             idxs.shape
         )
@@ -453,10 +506,9 @@ class LightningModel(pl.LightningModule):
 
         # Compute probabilities
         self.eval()
-        logits = self.forward(idxs.to(self.device), drop_label=False)[
+        probs = self.forward(idxs.to(self.device), drop_label=False)[
             :, :, :-1
         ]  # N, 16, label+seq+1
-        probs = self.logits_to_probs(logits)  # N, 16, label+seq+1
 
         # Compute likelihood
         idxs = idxs[:, 1:]  # N, label+seq+1
@@ -491,10 +543,9 @@ class LightningModel(pl.LightningModule):
 
         # Compute probabilities
         self.eval()
-        logits = self.forward(idxs.to(self.device), drop_label=True)[
+        probs = self.forward(idxs.to(self.device), drop_label=True)[
             :, :, :-1
         ]  # N, 16, seq OR N, 16, seq+1
-        probs = self.logits_to_probs(logits)  # N, 16, seq OR N, 16, seq+1
         idxs = idxs[:, 1 + self.label_len :]  # N, seq
 
         # Compute likelihoods
@@ -528,10 +579,12 @@ class LightningModel(pl.LightningModule):
             ],
             axis=-1,
         )  # N, L, possible_labels
+
         denominators = np.sum(likelihoods, -1)  # N, L
         numerators = [
             lik[:, possible_labels == label] for lik, label in zip(likelihoods, labels)
         ]  # N, L
+
         if log:
             P = np.log(numerators) - np.log(denominators)  # N, L
         else:
@@ -545,39 +598,66 @@ class LightningModel(pl.LightningModule):
                 return np.product(P, 1)  # N
 
     def normalize_filtered_probs(self, filtered_probs):
+        """
+        Normalize probabilities at each position to sum to 1.
+
+        Args:
+            filtered_probs (torch.floatTensor): Tensor of shape (N, 16, L) or (N, 16)
+
+        Returns:
+            Normalized tensor of the same shape
+        """
         return filtered_probs / filtered_probs.sum(dim=1, keepdim=True)
 
     def filter_base_probs(self, probs, normalize=True):
         """
+        Return probabilities for valid bases only
+
         Args:
             probs (torch.tensor, dtype torch.float32): tensor of shape (N, 16)
+            normalize (bool): Whether to re-normalize the probabilities at each
+            position to sum to 1.
 
         Returns:
-            tensor of shape (N, 4)
+            filtered_probs (torch.FloatTensor): tensor of shape (N, 4)
         """
+        # Check shape
         assert probs.dim() == 2
         assert probs.shape[1] == 16
+
+        # Filter probabilities
         filtered_probs = probs[:, [7, 8, 9, 10]]
+
+        # Normalize
         if normalize:
             filtered_probs = self.normalize_filtered_probs(filtered_probs)
         return filtered_probs
 
     def threshold_probs(self, filtered_probs, top_k=None, top_p=None):
         """
+        Threshold the filtered probabilities for valid bases
+
         Args:
             filtered_probs (torch.tensor, dtype torch.float32): tensor of shape (N, 4)
+            top_k (int): Select the top k bases at each position. Set probabilites
+                of other bases to 0.
+            top_p (float): Select the top bases at each position until their cumulative
+                probability reaches this value. Set probabilites of other bases to 0.
 
         Returns:
             tensor of shape (N, 4)
         """
+        # Check shape
         assert filtered_probs.dim() == 2
         assert filtered_probs.shape[1] == 4
 
+        # Top K sampling
         if top_k is not None:
             p_idxs = filtered_probs.argsort(1, descending=True)
             for seq_idx in range(filtered_probs.shape[0]):
                 filtered_probs[seq_idx, p_idxs[seq_idx, top_k:]] = 0
 
+        # Top P (nucleus) sampling
         if top_p is not None:
             p_sorted, p_idxs = filtered_probs.sort(1, descending=True)
             cut = (p_sorted.cumsum(1) > top_p).cpu().detach().numpy().argmax(1).tolist()
@@ -587,30 +667,38 @@ class LightningModel(pl.LightningModule):
 
         return filtered_probs
 
-    def logits_to_idxs(
-        self, logits, random_state=None, top_k=None, top_p=None, normalize_filtered=True
+    def sample_idxs(
+        self, probs, random_state=None, top_k=None, top_p=None, normalize_filtered=True
     ):
         """
+        Sample from model predictions at a single position to return a single
+        base per example
+
         Args:
-            logits (torch.tensor, dtype torch.float32): tensor of shape (N, 16)
+            probs (torch.tensor, dtype torch.float32): tensor of shape (N, 16)
+            random_state (torch.Generator): torch.Generator object
+            top_k (int): Select the top k bases at each position. Set probabilites
+                of other bases to 0.
+            top_p (float): Select the top bases at each position until their cumulative
+                probability reaches this value. Set probabilites of other bases to 0.
+            normalize_filtered (bool): Normalize probabilities to sum to 1
+                after filtering
 
         Returns:
             idxs (torch.LongTensor): tensor of shape (N)
         """
-        assert logits.dim() == 2, logits.shape
-        assert logits.shape[1] == 16, logits.shape
-
-        # Get probabilities
-        probs = self.logits_to_probs(logits)  # N, 16
+        # Check
+        assert probs.dim() == 2, probs.shape
+        assert probs.shape[1] == 16, probs.shape
 
         # Subset to valid bases
         probs = self.filter_base_probs(probs, normalize=normalize_filtered)  # N, 4
 
-        # Filter probs
+        # Threshold probabilities for sampling
         probs = self.threshold_probs(probs, top_k=top_k, top_p=top_p)  # N, 4
 
         # Re-normalize
-        probs = probs / probs.sum(dim=1, keepdim=True)
+        probs = self.normalize_filtered_probs(probs)
 
         # Sample
         if random_state is None:
@@ -619,7 +707,7 @@ class LightningModel(pl.LightningModule):
             idxs = probs.multinomial(1, generator=random_state).squeeze() + 7
 
         # Send to device
-        return idxs.to(logits.device)
+        return idxs.to(probs.device)
 
     @torch.no_grad()
     def generate(
@@ -637,10 +725,13 @@ class LightningModel(pl.LightningModule):
             labels (str, list): Strings of label tokens
             max_new_tokens (int): Maximum number of tokens to add
             temperature (float): Temperature
-            top_k (int): Sample from top k bases
-            top_p (float): Sample from bases with top_p cumulative probability
+            top_k (int): Select the top k bases at each position. Set probabilites
+                of other bases to 0.
+            top_p (float): Select the top bases at each position until their cumulative
+                probability reaches this value. Set probabilites of other bases to 0.
             normalize_filtered (bool): Normalize probabilities to sum to 1
                 after filtering
+            seed (int): Random seed for sampling
 
         Returns:
             seqs (list): List of strings
@@ -671,10 +762,6 @@ class LightningModel(pl.LightningModule):
             # Get logits
             logits_next = self.forward(idxs)[:, :, -1]  # N, 16
 
-            if temperature != 1.0:
-                # scale by temperature
-                logits_next = logits_next / temperature
-
             # Get next indices
             idxs_next = self.logits_to_idxs(
                 logits_next,
@@ -690,6 +777,9 @@ class LightningModel(pl.LightningModule):
         return self.decode(idxs[:, self.label_len + 1 :])
 
     def on_save_checkpoint(self, checkpoint):
+        """
+        Save data relevant parameters to the model checkpoint on training.
+        """
         checkpoint["hyper_parameters"]["seq_len"] = self.seq_len
         checkpoint["hyper_parameters"]["label_len"] = self.label_len
         checkpoint["hyper_parameters"]["unique_labels"] = self.unique_labels

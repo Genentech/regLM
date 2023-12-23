@@ -37,12 +37,13 @@ def evolve(
     Returns:
         df (pd.DataFrame): Dataframe containing evolution results
     """
+    # Create empty dataframe for results
     df = pd.DataFrame()
 
     # Iterate
     for i in range(max_iter + 1):
         if i == 0:
-            # starting sequences
+            # initial dataframe includes only starting sequences
             curr_df = pd.DataFrame(
                 {
                     "Sequence": start_seqs,
@@ -54,10 +55,10 @@ def evolve(
 
         elif i > 0:
             print(f"Iteration: {i}")
+            start_seq_lens = [len(seq) for seq in start_seqs]
 
             # ISM
             new_seqs = np.concatenate([ISM(seq, drop_ref=True) for seq in start_seqs])
-            start_seq_lens = [len(seq) for seq in start_seqs]
             curr_df = pd.DataFrame(
                 {
                     "Sequence": new_seqs,
@@ -88,14 +89,17 @@ def evolve(
                 ]
             )
 
+            # Filter sequences based on whether the likelihood has improved
+            # relative to their previous sequence
             if i > 0:
-                # Filter
+                # Get likelihood of the respective start sequence
                 curr_df["prev_likelihood"] = curr_df.start_seq.apply(
                     lambda x: start_likelihoods[x]
                 )
+                # Filter
                 curr_df = curr_df[curr_df.likelihood > (curr_df.prev_likelihood - tol)]
 
-        # Predict with regression model
+        # Predict function with regression model
         ds = SeqDataset(curr_df.Sequence.tolist(), seq_len=seq_len)
         preds = regression_model.predict_on_dataset(
             ds, batch_size=batch_size, device=device, num_workers=num_workers
@@ -110,17 +114,19 @@ def evolve(
         curr_df["pred"] = [x for x in preds]
 
         if i > 0:
-            # Get best sequence from each starting sequence
+            # Get the best sequence from each starting sequence
             curr_df["best_in_iter"] = [False] * len(curr_df)
             curr_df.loc[
                 curr_df.groupby("start_seq").pred.idxmax(), "best_in_iter"
             ] = True
 
-        # Collect sequences to start the next iteration
+        # Collect the sequences to start the next iteration
+        # And compute their likelihood
         start_seqs = curr_df.loc[curr_df.best_in_iter, "Sequence"].tolist()
         if language_model is not None:
             start_likelihoods = curr_df.loc[curr_df.best_in_iter, "likelihood"].tolist()
 
+        # Concat to results
         df = pd.concat([df, curr_df])
 
     return df.reset_index(drop=True)

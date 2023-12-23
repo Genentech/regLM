@@ -15,20 +15,13 @@ def ISM_at_pos(seq, pos, drop_ref=True):
         drop_ref (bool): If True, the original base at the mutation position is dropped.
 
     Returns:
-        outputs (list): List of mutated DNA sequences
+        List of mutated DNA sequences, of length 3 or 4
     """
-    outputs = []
     alt_bases = ["A", "C", "G", "T"]
-
     if drop_ref:
         alt_bases.remove(seq[pos])
 
-    for base in alt_bases:
-        mutated_seq = list(seq)
-        mutated_seq[pos] = base
-        outputs.append("".join(mutated_seq))
-
-    return outputs
+    return [seq[:pos] + base + seq[pos + 1 :] for base in alt_bases]
 
 
 def ISM(seq, drop_ref=True):
@@ -40,7 +33,7 @@ def ISM(seq, drop_ref=True):
         drop_ref (bool): If True, the original base at the mutation position is dropped.
 
     Returns:
-        List of mutated DNA sequences
+        List of mutated DNA sequences, of length 3*len(seq) or 4*len(seq)
     """
     return list(
         np.concatenate(
@@ -57,9 +50,13 @@ def ISM_predict(seqs, model, seq_len=None, batch_size=512, device=0):
     Args:
         seqs (list): List of DNA sequences of equal length
         model (pl.LightningModule): regression model
+        seq_len (int): Maximum sequence length for regression model
+        batch_size (int): Batch size for prediction
+        device (int): GPU index for prediction
 
     Returns:
-        np.array of shape (number of sequences x length of sequences) containing
+        np.array of shape (number of sequences x length of sequences) or
+        (number of sequences x length of sequences x number of tasks), containing
         per-base importance scores
     """
 
@@ -80,13 +77,14 @@ def ISM_predict(seqs, model, seq_len=None, batch_size=512, device=0):
         device=device,
         batch_size=batch_size,
     )  # Nx4xseq_len, n_tasks
+
+    # Reshape the predictions
     if preds.ndim == 1:
         preds = np.expand_dims(preds, 1)
     assert (preds.ndim == 2) and (
         preds.shape[0] == len(seqs) * 4 * actual_seq_len
     ), preds.shape
 
-    # Reshape
     preds = preds.reshape(
         len(seqs), 4 * actual_seq_len, preds.shape[-1]
     )  # N, 4*seq_len, n_tasks
@@ -121,7 +119,7 @@ def ISM_predict(seqs, model, seq_len=None, batch_size=512, device=0):
     return scores.squeeze()  # N, seq_len, n_tasks
 
 
-def generate_random_sequences(n=1, seq_len=1024, seed=0):
+def generate_random_sequences(n=1, seq_len=1024, seed=None):
     """
     Generate random DNA sequences.
 
@@ -152,7 +150,7 @@ def motif_likelihood(seqs, motif, label, model):
     Args:
         seqs (list): Sequences
         motif (seq): Motif sequence
-        label (list): Labels
+        label (list): Label for the regLM model
         model (pl.LightningModule): regLM model
 
     Returns:
@@ -169,7 +167,7 @@ def motif_likelihood(seqs, motif, label, model):
     return motif_likelihood.sum(1)
 
 
-def motif_insert(pwms, model, label, ref_label, n=100, seq_len=100):
+def motif_insert(pwms, model, label, ref_label, seq_len, n=100):
     """
     Insert motifs into random sequences and calculate log-likelihood ratio
     of each motif given label vs. reference label.
@@ -177,13 +175,14 @@ def motif_insert(pwms, model, label, ref_label, n=100, seq_len=100):
     Args:
         pwms (list): Sequences
         model (pl.LightningModule): regLM model
-        label (list): Labels
+        label (list): Label for the regLM model
         ref_label (str):
-        n (int):
-        seq_len (int):
+        seq_len (int): Length of random sequences preceding the motif
+        n (int): number of random sequences to insert the motif in
 
     Returns:
-        (list): log-likelihoods
+        (pd.DataFrame): Dataframe containing log likelihood ratios of motif-containing
+        sequences
     """
     out = pd.DataFrame()
     random_seqs = generate_random_sequences(n=n, seq_len=seq_len)

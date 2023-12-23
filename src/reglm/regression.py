@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 
 class SeqDataset(Dataset):
     """
-    Torch dataset class for training enformer-based regression models
+    PyTorch dataset class for training enformer-based regression models
 
     Args:
         seqs (list, pd.DataFrame): either a list of DNA sequences, or a dataframe whose

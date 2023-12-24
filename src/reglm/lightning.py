@@ -198,7 +198,7 @@ class LightningModel(pl.LightningModule):
         self.log(
             "train_loss",
             loss,
-            logger=self.logger_type is not None,
+            logger=True,
             on_step=True,
             on_epoch=True,
             prog_bar=True,
@@ -215,7 +215,7 @@ class LightningModel(pl.LightningModule):
         self.log(
             "val_loss",
             loss,
-            logger=self.logger_type is not None,
+            logger=True,
             on_step=False,
             on_epoch=True,
         )

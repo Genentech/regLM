@@ -159,10 +159,14 @@ class LightningModel(pl.LightningModule):
         # Trailing zeros in the label will be ignored in calculating the loss
         self.loss = lambda logits, y: F.cross_entropy(logits, y, ignore_index=0)
 
-    def forward(self, x, drop_label=True, logits=False):
+    def forward(self, x, drop_label=True, return_logits=False):
         """
         Args:
             x (torch.tensor, dtype torch.float32): tensor of shape (N, L)
+            drop_label (bool): Whether to drop the predictions for the
+                positions corresponding to label tokens
+            return_logits (bool): If true, return logits. Otherwise, return
+                probabilities
 
         Returns:
             logits (torch.tensor, dtype torch.float32): tensor of shape
@@ -180,7 +184,7 @@ class LightningModel(pl.LightningModule):
             logits = logits[:, :, self.label_len :]  # N, seq + end + trailing
 
         # Return logits or normalized probabilities
-        if logits:
+        if return_logits:
             return logits
         else:
             return logits.softmax(1)
@@ -188,7 +192,7 @@ class LightningModel(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         x, y = batch
         logits = self.forward(
-            x, drop_label=True, logits=True
+            x, drop_label=True, return_logits=True
         )  # N, seq + end + trailing
         loss = self.loss(logits, y)  # Loss will be calculated over seq + end positions
         self.log(
@@ -204,7 +208,7 @@ class LightningModel(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         x, y = batch
         logits = self.forward(
-            x, drop_label=True, logits=True
+            x, drop_label=True, return_logits=True
         )  # N, seq + end + trailing
         loss = self.loss(logits, y)  # Loss will be calculated over seq + end positions
         self.val_acc.update(logits.argmax(1), y)

@@ -115,7 +115,7 @@ class EnformerModel(pl.LightningModule):
         else:
             self.loss = nn.MSELoss()
 
-    def forward(self, x, logits=False):
+    def forward(self, x, return_logits=False):
         if (isinstance(x, list)) or (isinstance(x, tuple)):
             if isinstance(x[0], str):
                 # If x is a list of strings, convert it into a one-hot encoded tensor
@@ -128,24 +128,24 @@ class EnformerModel(pl.LightningModule):
         x = self.head(x)  # N, L, n_tasks
         x = x.mean(1)  # N, n_tasks
 
-        if (self.loss_type == "poisson") and (not logits):
+        if (self.loss_type == "poisson") and (not return_logits):
             x = torch.exp(x)
         return x
 
     def training_step(self, batch, batch_idx):
         x, y = batch
-        logits = self.forward(x, logits=True)
+        logits = self.forward(x, return_logits=True)
         loss = self.loss(logits, y)
         self.log(
-            "train_loss", loss, logger=False, on_step=True, on_epoch=True, prog_bar=True
+            "train_loss", loss, logger=True, on_step=True, on_epoch=True, prog_bar=True
         )
         return loss
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
-        logits = self.forward(x, logits=True)
+        logits = self.forward(x, return_logits=True)
         loss = self.loss(logits, y)
-        self.log("val_loss", loss, logger=False, on_step=False, on_epoch=True)
+        self.log("val_loss", loss, logger=True, on_step=False, on_epoch=True)
         return loss
 
     def validation_epoch_end(self, output):

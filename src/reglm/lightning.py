@@ -763,12 +763,12 @@ class LightningModel(pl.LightningModule):
         for _ in range(max_new_tokens):
             self.eval()
 
-            # Get logits
-            logits_next = self.forward(idxs)[:, :, -1]  # N, 16
+            # Predict next base probabilities
+            probs_next = self.forward(idxs, return_logits=False)[:, :, -1]  # N, 16
 
             # Get next indices
-            idxs_next = self.logits_to_idxs(
-                logits_next,
+            idxs_next = self.sample_idxs(
+                probs_next,
                 random_state=rng,
                 top_k=top_k,
                 top_p=top_p,

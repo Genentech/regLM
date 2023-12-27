@@ -78,7 +78,7 @@ config = {
 }
 
 # Build model
-model = LightningModel(config=config, logger=None, label_len=2).to(torch.device(0))
+model = LightningModel(config=config, label_len=2).to(torch.device(0))
 model.seq_len = 4
 model.eval()
 
@@ -119,7 +119,6 @@ def test_decode():
 
 def test_prediction_1():
     # Probs
-    assert torch.allclose(model.logits_to_probs(logits), probs, rtol=1e-2)
     fprobs = torch.Tensor([[0.14788991, 0.43449541, 0.27889908, 0.1387156]])
     assert torch.allclose(
         model.filter_base_probs(probs[:, :, 0], normalize=True), fprobs
@@ -145,17 +144,22 @@ def test_prediction_1():
 def test_prediction_2():
     # Forward pass
     logits_01acg = model.forward(
-        torch.LongTensor([[0, 2, 3, 7, 8, 9, 1]]).to(model.device), drop_label=False
+        torch.LongTensor([[0, 2, 3, 7, 8, 9, 1]]).to(model.device), return_logits=True,
+        drop_label=False
     )
     assert logits_01acg.shape == (1, 16, 7)
     logits_01acg_no_label = model.forward(
-        torch.LongTensor([[0, 2, 3, 7, 8, 9, 1]]).to(model.device), drop_label=True
+        torch.LongTensor([[0, 2, 3, 7, 8, 9, 1]]).to(model.device), return_logits=True,
+        drop_label=True
     )
     assert logits_01acg_no_label.shape == (1, 16, 5)
     assert torch.allclose(logits_01acg_no_label, logits_01acg[:, :, 2:])
 
     # Probs
-    probs_01acg = model.logits_to_probs(logits_01acg)  # 1, 16, 7
+    probs_01acg = model.forward(
+        torch.LongTensor([[0, 2, 3, 7, 8, 9, 1]]).to(model.device), return_logits=False,
+        drop_label=False
+    )  # 1, 16, 7
     assert probs_01acg.shape == (1, 16, 7)
     assert torch.allclose(probs_01acg, torch.nn.Softmax(1)(logits_01acg))
 
@@ -222,7 +226,7 @@ def test_prediction_2():
 def test_generation():
     rng = torch.Generator()
     rng.manual_seed(0)
-    assert model.logits_to_idxs(logits[:, :, 0], random_state=rng) == torch.tensor(9)
+    assert model.sample_idxs(probs[:, :, 0], random_state=rng) == torch.tensor(9)
     gen = model.generate(labels=["01", "01"], max_new_tokens=3)
     assert len(gen) == 2
     assert len(gen[0]) == len(gen[1]) == 3

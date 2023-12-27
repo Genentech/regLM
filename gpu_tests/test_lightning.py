@@ -144,21 +144,24 @@ def test_prediction_1():
 def test_prediction_2():
     # Forward pass
     logits_01acg = model.forward(
-        torch.LongTensor([[0, 2, 3, 7, 8, 9, 1]]).to(model.device), return_logits=True,
-        drop_label=False
+        torch.LongTensor([[0, 2, 3, 7, 8, 9, 1]]).to(model.device),
+        return_logits=True,
+        drop_label=False,
     )
     assert logits_01acg.shape == (1, 16, 7)
     logits_01acg_no_label = model.forward(
-        torch.LongTensor([[0, 2, 3, 7, 8, 9, 1]]).to(model.device), return_logits=True,
-        drop_label=True
+        torch.LongTensor([[0, 2, 3, 7, 8, 9, 1]]).to(model.device),
+        return_logits=True,
+        drop_label=True,
     )
     assert logits_01acg_no_label.shape == (1, 16, 5)
     assert torch.allclose(logits_01acg_no_label, logits_01acg[:, :, 2:])
 
     # Probs
     probs_01acg = model.forward(
-        torch.LongTensor([[0, 2, 3, 7, 8, 9, 1]]).to(model.device), return_logits=False,
-        drop_label=False
+        torch.LongTensor([[0, 2, 3, 7, 8, 9, 1]]).to(model.device),
+        return_logits=False,
+        drop_label=False,
     )  # 1, 16, 7
     assert probs_01acg.shape == (1, 16, 7)
     assert torch.allclose(probs_01acg, torch.nn.Softmax(1)(logits_01acg))

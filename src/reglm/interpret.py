@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
+from enformer_pytorch.data import str_to_one_hot
 
 from reglm.regression import SeqDataset
-from reglm.utils import seqs_to_idxs
 
 
 def ISM_at_pos(seq, pos, drop_ref=True):
@@ -42,7 +42,7 @@ def ISM(seq, drop_ref=True):
     )
 
 
-def ISM_predict(seqs, model, seq_len=None, batch_size=512, device=0):
+def ISM_predict(seqs, model, seq_len=None, batch_size=512, device=0, num_workers=8):
     """
     Perform in-silico mutagenesis of DNA sequences and make predictions with a
     regression model to get per-base importance scores
@@ -52,12 +52,11 @@ def ISM_predict(seqs, model, seq_len=None, batch_size=512, device=0):
         model (pl.LightningModule): regression model
         seq_len (int): Maximum sequence length for regression model
         batch_size (int): Batch size for prediction
+        num_workers (int): Number of workers for prediction
         device (int): GPU index for prediction
 
     Returns:
-        np.array of shape (number of sequences x length of sequences) or
-        (number of sequences x length of sequences x number of tasks), containing
-        per-base importance scores
+        preds (np.array): Array of shape (number of sequences x length of sequences x 4)
     """
 
     # Get sequence length
@@ -76,47 +75,41 @@ def ISM_predict(seqs, model, seq_len=None, batch_size=512, device=0):
         dataset,
         device=device,
         batch_size=batch_size,
-    )  # Nx4xseq_len, n_tasks
+        num_workers=num_workers,
+    ).squeeze()  # Nx4xseq_len
 
     # Reshape the predictions
-    if preds.ndim == 1:
-        preds = np.expand_dims(preds, 1)
-    assert (preds.ndim == 2) and (
-        preds.shape[0] == len(seqs) * 4 * actual_seq_len
-    ), preds.shape
+    assert preds.shape[0] == len(seqs) * 4 * actual_seq_len, preds.shape
+    preds = preds.reshape(len(seqs), 4 * actual_seq_len)  # N, 4*seq_len
+    preds = preds.reshape(len(seqs), actual_seq_len, 4)  # N, seq_len, 4
 
-    preds = preds.reshape(
-        len(seqs), 4 * actual_seq_len, preds.shape[-1]
-    )  # N, 4*seq_len, n_tasks
+    return preds
 
-    preds = preds.reshape(
-        len(seqs), actual_seq_len, 4, preds.shape[-1]
-    )  # N, seq_len, 4, n_tasks
 
-    # Make empty array for final scores
-    scores = np.zeros(np.delete(preds.shape, 2))  # N, seq_len, n_tasks
+def ISM_score(seqs, preds):
+    """
+    Calculate a per-base importance score from ISM predictions
 
-    # Convert original sequences to indices
-    idxs = seqs_to_idxs(seqs)  # N, seq_len
+    Args:
+        seqs (list): List of sequences
+        preds (np.array): ISM predictions from seqs
 
-    # Take the log-ratio of the predicted scores relative to the original sequence
-    for seq_idx in range(scores.shape[0]):
-        for pos_idx in range(scores.shape[1]):
-            # Get predictions at true and mutated bases
-            true_idx = idxs[seq_idx, pos_idx]
-            mutated_idxs = [idx for idx in range(4) if idx != true_idx]
-            true_preds = preds[seq_idx, pos_idx, true_idx]  # n_tasks
-            mutated_preds = preds[seq_idx, pos_idx, mutated_idxs]  # 3, n_tasks
+    Returns:
+        scores (np.array): Array of shape (N x seq_len), containing
+        per-base importance scores
+    """
+    # Convert original sequences to one-hot
+    one_hot = str_to_one_hot(seqs)  # N, seq_len, 4
 
-            # Calculate average log2 ratio caused by mutation
-            score = -np.log2(mutated_preds / np.expand_dims(true_preds, 0)).mean(
-                0
-            )  # n_tasks
+    # Get the predictions for reference bases
+    ref_preds = np.sum(preds * one_hot, axis=2, keepdims=True)  # N, seq_len, 1
 
-            # Insert
-            scores[seq_idx, pos_idx] = score
+    # Take the negative log-ratio of the predicted value
+    # relative to the original sequence
+    scores = -np.log2(preds / ref_preds)  # N, seq_len, 4
 
-    return scores.squeeze()  # N, seq_len, n_tasks
+    # Calculate the average effect of mutation
+    return scores.sum(2) / 3  # N, seq_len
 
 
 def generate_random_sequences(n=1, seq_len=1024, seed=None):
@@ -167,13 +160,14 @@ def motif_likelihood(seqs, motif, label, model):
     return motif_likelihood.sum(1)
 
 
-def motif_insert(pwms, model, label, ref_label, seq_len, n=100):
+def motif_insert(motif_dict, model, label, ref_label, seq_len, n=100):
     """
     Insert motifs into random sequences and calculate log-likelihood ratio
     of each motif given label vs. reference label.
 
     Args:
-        pwms (list): Sequences
+        motif_dict (dict): Dictionary with key-value pairs such as
+            motif ID: consensus sequence
         model (pl.LightningModule): regLM model
         label (list): Label for the regLM model
         ref_label (str):
@@ -187,13 +181,7 @@ def motif_insert(pwms, model, label, ref_label, seq_len, n=100):
     out = pd.DataFrame()
     random_seqs = generate_random_sequences(n=n, seq_len=seq_len)
 
-    for row in pwms.iterrows():
-        # Get the motif name
-        motif_id = row[0]
-
-        # Get the consensus sequence
-        consensus = row[1].consensus
-
+    for motif_id, consensus in motif_dict.items():
         # Compute log-likelihood with token 00 and 44
         LL_with_label = motif_likelihood(random_seqs, consensus, label, model)
         LL_with_ref = motif_likelihood(random_seqs, consensus, ref_label, model)

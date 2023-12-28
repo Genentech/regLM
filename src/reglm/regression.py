@@ -65,12 +65,12 @@ class SeqDataset(Dataset):
 
 class EnformerModel(pl.LightningModule):
     """
-    Enformer-based regression models that can be trained from scratch or finetuned.
+    Enformer-based single-task regression models that can be
+    trained from scratch or finetuned.
 
     Args:
         lr (float): learning rate
         loss (str): "poisson" or "mse"
-        n_tasks (int): Number of regression tasks
         pretrained (bool): If true, initialize from the pretrained enformer model
         dim (int): Number of conv layer filters
         depth (int): Number of transformer layers
@@ -81,16 +81,14 @@ class EnformerModel(pl.LightningModule):
         self,
         lr=1e-4,
         loss="poisson",
-        n_tasks=1,
         pretrained=False,
         dim=1536,
         depth=11,
         n_downsamples=7,
     ):
         super().__init__()
-
+        self.n_tasks = 1
         self.save_hyperparameters(ignore=["model"])
-        self.n_tasks = n_tasks
 
         # Build model
         if pretrained:
@@ -105,7 +103,7 @@ class EnformerModel(pl.LightningModule):
                 num_downsamples=n_downsamples,
                 target_length=-1,
             )._trunk
-        self.head = nn.Linear(dim * 2, n_tasks, bias=True)
+        self.head = nn.Linear(dim * 2, self.n_tasks, bias=True)
 
         # Training params
         self.lr = lr
@@ -125,8 +123,8 @@ class EnformerModel(pl.LightningModule):
                 x = x[0]
 
         x = self.trunk(x)  # N, L, dim*2
-        x = self.head(x)  # N, L, n_tasks
-        x = x.mean(1)  # N, n_tasks
+        x = self.head(x)  # N, L, 1
+        x = x.mean(1)  # N, 1
 
         if (self.loss_type == "poisson") and (not return_logits):
             x = torch.exp(x)
@@ -224,9 +222,23 @@ class EnformerModel(pl.LightningModule):
 
         # Run inference
         return (
-            torch.concat(trainer.predict(self, dataloader))
-            .cpu()
-            .detach()
-            .numpy()
-            .squeeze()
-        )
+            torch.concat(trainer.predict(self, dataloader)).cpu().detach().numpy()
+        )  # N, 1
+
+
+def MultiTaskEnformerModel(EnformerModel):
+    """
+    Combine multiple single-task enformer models into a single object.
+
+    Args:
+        models (list): List of multiple EnformerModel objects
+        device (int): GPU index
+    """
+
+    def __init__(self, models, device=0):
+        super().__init__()
+        self.models = [model.to(torch.device(device)) for model in models]
+        self.n_tasks = len(self.models)
+
+    def forward(self, x):
+        return torch.cat([model(x) for model in self.models], axis=1)  # N

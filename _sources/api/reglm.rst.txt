@@ -1,0 +1,69 @@
+reglm package
+=============
+
+Submodules
+----------
+
+reglm.dataset module
+--------------------
+
+.. automodule:: reglm.dataset
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+reglm.evolve module
+-------------------
+
+.. automodule:: reglm.evolve
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+reglm.interpret module
+----------------------
+
+.. automodule:: reglm.interpret
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+reglm.lightning module
+----------------------
+
+.. automodule:: reglm.lightning
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+reglm.metrics module
+--------------------
+
+.. automodule:: reglm.metrics
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+reglm.regression module
+-----------------------
+
+.. automodule:: reglm.regression
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+reglm.utils module
+------------------
+
+.. automodule:: reglm.utils
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Module contents
+---------------
+
+.. automodule:: reglm
+   :members:
+   :undoc-members:
+   :show-inheritance:

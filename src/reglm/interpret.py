@@ -99,7 +99,7 @@ def ISM_score(seqs, preds):
         per-base importance scores
     """
     # Convert original sequences to one-hot
-    one_hot = str_to_one_hot(seqs)  # N, seq_len, 4
+    one_hot = str_to_one_hot(seqs).numpy()  # N, seq_len, 4
 
     # Get the predictions for reference bases
     ref_preds = np.sum(preds * one_hot, axis=2, keepdims=True)  # N, seq_len, 1

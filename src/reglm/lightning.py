@@ -406,7 +406,7 @@ class LightningModel(pl.LightningModule):
 
     def encode(self, seqs, labels, add_start=False, add_stop=False):
         """
-        Encode sequences and labels as indices for mdoel inference.
+        Encode sequences and labels as indices for model inference.
 
         Args:
             seqs (list, str): Strings of base tokens
@@ -567,10 +567,12 @@ class LightningModel(pl.LightningModule):
                 return np.product(L, 1)  # N
 
     def P_labels_given_seqs(self, seqs, labels, per_pos=True, log=True):
+        # List all possible labels
         possible_labels = [
             "".join(x)
-            for x in itertools.permutations(self.unique_labels, self.label_len)
+            for x in itertools.product(self.unique_labels, repeat=self.label_len)
         ]
+        # Compute likelihood for each possible label
         likelihoods = np.stack(
             [
                 self.P_seqs(
@@ -583,12 +585,16 @@ class LightningModel(pl.LightningModule):
             ],
             axis=-1,
         )  # N, L, possible_labels
-
+        # Calculate numerator and denominator for posterior
         denominators = np.sum(likelihoods, -1)  # N, L
-        numerators = [
-            lik[:, possible_labels == label] for lik, label in zip(likelihoods, labels)
-        ]  # N, L
+        numerators = np.vstack(
+            [
+                likelihoods[i, :, np.array(possible_labels) == labels[i]]
+                for i in range(len(seqs))
+            ]
+        )
 
+        # Compute posterior
         if log:
             P = np.log(numerators) - np.log(denominators)  # N, L
         else:

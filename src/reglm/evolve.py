@@ -100,7 +100,7 @@ def evolve(
                 curr_df = curr_df[curr_df.likelihood > (curr_df.prev_likelihood - tol)]
 
         # Predict function with regression model
-        ds = SeqDataset(curr_df.Sequence.tolist(), seq_len=seq_len)
+        ds = SeqDataset(curr_df.Sequence.tolist())
         preds = regression_model.predict_on_dataset(
             ds, batch_size=batch_size, device=device, num_workers=num_workers
         )
@@ -110,7 +110,7 @@ def evolve(
             preds = preds.mean(1)
         else:
             non_specific = [x for x in range(preds.shape[1]) if x != specific]
-            preds = preds[:, non_specific].mean(1) - preds[:, specific].mean(1)
+            preds = preds[:, non_specific].max(1) - preds[:, specific]
         curr_df["pred"] = [x for x in preds]
 
         if i > 0:

@@ -108,8 +108,15 @@ def ISM_score(seqs, preds):
     # relative to the original sequence
     scores = -np.log2(preds / ref_preds)  # N, seq_len, 4
 
+    # Make mask
+    mask = ~one_hot.astype(bool)
+
     # Calculate the average effect of mutation
-    return scores.sum(2) / 3  # N, seq_len
+    mean_scores = np.zeros_like(scores[:, :, 0])
+    for i in range(scores.shape[0]):
+        for j in range(scores.shape[1]):
+            mean_scores[i, j] = scores[i, j][mask[i, j]].mean()
+    return mean_scores
 
 
 def generate_random_sequences(n=1, seq_len=1024, seed=None):

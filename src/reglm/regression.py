@@ -226,7 +226,7 @@ class EnformerModel(pl.LightningModule):
         )  # N, 1
 
 
-def MultiTaskEnformerModel(EnformerModel):
+class MultiTaskEnformerModel(nn.Module):
     """
     Combine multiple single-task enformer models into a single object.
 
@@ -235,10 +235,44 @@ def MultiTaskEnformerModel(EnformerModel):
         device (int): GPU index
     """
 
-    def __init__(self, models, device=0):
+    def __init__(self, model1, model2, model3=None, mean=False, specificity=None):
         super().__init__()
-        self.models = [model.to(torch.device(device)) for model in models]
-        self.n_tasks = len(self.models)
+        self.model1 = model1
+        self.model2 = model2
+        self.model3 = model3
+        self.n_tasks = 2 if model3 is None else 3
+        self.mean = mean
+        self.specificity = specificity
 
     def forward(self, x):
-        return torch.cat([model(x) for model in self.models], axis=1)  # N
+        if self.model3 is None:
+            x = [self.model1(x), self.model2(x)]
+        else:
+            x = [self.model1(x), self.model2(x), self.model3(x)]
+        x = torch.cat(x, axis=1)  # N, n_models
+        return x
+
+    def predict_on_dataset(self, ds, **kwargs):
+        if self.model3 is None:
+            out = np.concatenate(
+                [
+                    self.model1.predict_on_dataset(ds, **kwargs),
+                    self.model2.predict_on_dataset(ds, **kwargs),
+                ],
+                axis=1,
+            )
+        else:
+            out = np.concatenate(
+                [
+                    self.model1.predict_on_dataset(ds, **kwargs),
+                    self.model2.predict_on_dataset(ds, **kwargs),
+                    self.model3.predict_on_dataset(ds, **kwargs),
+                ],
+                axis=1,
+            )
+        if self.mean:
+            out = out.mean(1)
+        elif self.specificity is not None:
+            non_specific = [x for x in range(self.n_tasks) if x != self.specificity]
+            out = out[:, self.specificity] - np.max(out[:, non_specific], axis=1)
+        return out

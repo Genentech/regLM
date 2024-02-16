@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import CSVLogger
 from torch import optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, WeightedRandomSampler
 from torchmetrics import Accuracy
 
 HYENADNA_MODEL_NAMES = [
@@ -240,6 +240,8 @@ class LightningModel(pl.LightningModule):
         device=0,
         max_epochs=3,
         val_check_interval=5000,
+        weights=None,
+        save_all=False,
     ):
         """
         Train regLM model.
@@ -267,24 +269,46 @@ class LightningModel(pl.LightningModule):
         # Logger
         logger = CSVLogger(self.save_dir)
 
+        # Create callback
+        callbacks = [
+            ModelCheckpoint(monitor="val_acc", mode="max"),
+            ModelCheckpoint(monitor="val_loss", mode="min"),
+        ]
+        if save_all:
+            callbacks.append(ModelCheckpoint(every_n_epochs=1, save_top_k=-1))
+
         # Set up trainer
         trainer = pl.Trainer(
             max_epochs=max_epochs,
             accelerator="gpu",
             devices=[device],
             logger=logger,
-            callbacks=[ModelCheckpoint(monitor="val_acc", mode="max")],
+            callbacks=callbacks,
             default_root_dir=self.save_dir,
             val_check_interval=val_check_interval,
         )
 
         # Make dataloaders
-        train_data = DataLoader(
-            train_dataset,
-            batch_size=batch_size,
-            shuffle=True,
-            num_workers=num_workers,
-        )
+        if weights is None:
+            train_data = DataLoader(
+                train_dataset,
+                batch_size=batch_size,
+                shuffle=True,
+                num_workers=num_workers,
+            )
+        else:
+            sampler = WeightedRandomSampler(
+                weights=weights,
+                num_samples=len(weights),
+                replacement=True,
+            )
+            train_data = DataLoader(
+                train_dataset,
+                batch_size=batch_size,
+                shuffle=False,
+                num_workers=num_workers,
+                sampler=sampler,
+            )
 
         val_data = DataLoader(
             val_dataset,

@@ -10,6 +10,6 @@ myst-parser[linkify]
 numpy
 pandas
 pytorch-lightning < 2.0
-sphinx>=3.2.1
+sphinx>=5.0.2
 torch
 torchmetrics

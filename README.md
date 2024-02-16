@@ -28,4 +28,5 @@ pip install .
 
 TBA
 
-Code used to perform the experiments in the regLM paper, along with trained model weights and synthetic sequences, are available at https://zenodo.org/records/10056648
+Code used to perform the experiments in the regLM paper, along with trained model weights and synthetic sequences, are available at [DOI 10.5281/zenodo.10669334](https://doi.org/10.5281/zenodo.10669334)https://doi.org/10.5281/zenodo.10669334
+

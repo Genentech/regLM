@@ -26,6 +26,6 @@ pip install .
 
 ## Preprint
 
-TBA
+https://www.biorxiv.org/content/10.1101/2024.02.14.580373
 
 Code used to perform the experiments in the regLM paper, along with trained model weights and synthetic sequences, are available at [Zenodo](https://doi.org/10.5281/zenodo.10669334).

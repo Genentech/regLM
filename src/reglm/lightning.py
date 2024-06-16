@@ -7,6 +7,7 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
+import tqdm
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import CSVLogger
 from torch import optim
@@ -26,7 +27,7 @@ HYENADNA_MODEL_NAMES = [
 
 def load_pretrained_model(
     ckpt_dir="./checkpoints/",
-    model="hyenadna-tiny-1k-seqlen",
+    model="hyenadna-medium-160k-seqlen",
     hyenadna_path="/code/hyena-dna",
 ):
     """
@@ -100,7 +101,7 @@ class LightningModel(pl.LightningModule):
     def __init__(
         self,
         config=None,
-        ckpt_dir=None,
+        ckpt_dir="./checkpoints/hyenadna-medium-160k-seqlen",
         hyenadna_path="/code/hyena-dna",
         save_dir=".",
         lr=1e-4,
@@ -115,7 +116,9 @@ class LightningModel(pl.LightningModule):
 
         # Build model
         if ckpt_dir is not None:
-            self.model = load_pretrained_model(ckpt_dir, hyenadna_path=hyenadna_path)
+            self.model = load_pretrained_model(
+                ckpt_dir=ckpt_dir, hyenadna_path=hyenadna_path
+            )
         elif config is not None:
             sys.path.append(hyenadna_path)
             from src.models.sequence.long_conv_lm import ConvLMHeadModel
@@ -353,13 +356,14 @@ class LightningModel(pl.LightningModule):
         y = []
 
         self.eval()
-        for batch in iter(dl):
-            x = batch[0].to(self.device)
-            probs = self.forward(
-                x, drop_label=True
-            ).squeeze()  # N, 16, seq+end+trailing
-            y_hat.append(probs.argmax(1).cpu().detach())  # N, seq+end+trailing
-            y.append(batch[1].detach().squeeze())  # N, seq+end+trailing zeros
+        with torch.no_grad():
+            for batch in tqdm.tqdm(iter(dl)):
+                x = batch[0].to(self.device)
+                probs = self.forward(
+                    x, drop_label=True
+                ).squeeze()  # N, 16, seq+end+trailing
+                y_hat.append(probs.argmax(1).cpu().detach())  # N, seq+end+trailing
+                y.append(batch[1].detach().squeeze())  # N, seq+end+trailing zeros
 
         # Stack batched predictions
         y_hat = torch.vstack(y_hat).numpy()  # N, L
@@ -809,6 +813,35 @@ class LightningModel(pl.LightningModule):
             idxs = torch.cat((idxs, idxs_next.unsqueeze(1)), dim=1)
 
         return self.decode(idxs[:, self.label_len + 1 :])
+
+    def beam_search(self, beam_width, batch_size, label):
+        bases = self.encode_seqs(["ACGT"]).T
+        idxs = self.encode_labels([label], add_start=True)
+        self.eval()
+
+        for i in tqdm.tqdm(range(self.seq_len)):
+            idxs = idxs.repeat_interleave(4, 0)
+            bases_ = bases.tile(idxs.shape[0] // 4, 1)
+            possibilities = torch.hstack((idxs, bases_))
+            probs = []
+
+            with torch.no_grad():
+                for st in range(0, possibilities.shape[0], batch_size):
+                    en = min(st + batch_size, possibilities.shape[0])
+                    batch = possibilities[st:en].to(self.device)
+                    batch_probs = self.forward(batch, drop_label=True)[:, :, :-1].cpu()
+                    probs.append(batch_probs)
+
+            probs = torch.cat(probs)
+            L = self.probs_to_likelihood(
+                probs=probs, idxs=possibilities[:, self.label_len + 1 :]
+            ).numpy()
+            L = np.sum(np.log(L), 1)
+            curr_beam_width = min(beam_width, len(L))
+            idxs = possibilities[L.argsort()[-curr_beam_width:], :]
+
+        seqs = self.decode(idxs[:, self.label_len + 1 :])
+        return seqs
 
     def on_save_checkpoint(self, checkpoint):
         """

@@ -814,17 +814,21 @@ class LightningModel(pl.LightningModule):
 
         return self.decode(idxs[:, self.label_len + 1 :])
 
-    def beam_search(self, beam_width, batch_size, label):
+    def beam_search(
+        self, beam_width, batch_size, label, random_state=None, sample=False
+    ):
         bases = self.encode_seqs(["ACGT"]).T
         idxs = self.encode_labels([label], add_start=True)
         self.eval()
 
         for i in tqdm.tqdm(range(self.seq_len)):
+            # Construct all possible sequences
             idxs = idxs.repeat_interleave(4, 0)
             bases_ = bases.tile(idxs.shape[0] // 4, 1)
             possibilities = torch.hstack((idxs, bases_))
             probs = []
 
+            # Compute likelihood of each sequence
             with torch.no_grad():
                 for st in range(0, possibilities.shape[0], batch_size):
                     en = min(st + batch_size, possibilities.shape[0])
@@ -835,11 +839,24 @@ class LightningModel(pl.LightningModule):
             probs = torch.cat(probs)
             L = self.probs_to_likelihood(
                 probs=probs, idxs=possibilities[:, self.label_len + 1 :]
-            ).numpy()
-            L = np.sum(np.log(L), 1)
-            curr_beam_width = min(beam_width, len(L))
-            idxs = possibilities[L.argsort()[-curr_beam_width:], :]
+            )
+            L = torch.sum(torch.log(L), 1)
 
+            # Sample sequences for next iteration
+            curr_beam_width = min(beam_width, len(L))
+            if sample:
+                L = torch.exp(L)
+                if random_state is None:
+                    choice = L.multinomial(curr_beam_width).squeeze()
+                else:
+                    choice = L.multinomial(
+                        curr_beam_width, generator=random_state
+                    ).squeeze()
+            else:
+                choice = L.numpy().argsort()[-curr_beam_width:]
+            idxs = possibilities[choice, :]
+
+        # Decode
         seqs = self.decode(idxs[:, self.label_len + 1 :])
         return seqs
 

@@ -1,0 +1,311 @@
+
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>reglm.interpret &#8212; regLM unknown documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css" />
+    <link rel="stylesheet" type="text/css" href="../../_static/alabaster.css" />
+    <script data-url_root="../../" id="documentation_options" src="../../_static/documentation_options.js"></script>
+    <script src="../../_static/jquery.js"></script>
+    <script src="../../_static/underscore.js"></script>
+    <script src="../../_static/doctools.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+   
+  <link rel="stylesheet" href="../../_static/custom.css" type="text/css" />
+  
+
+  
+  
+
+  </head><body>
+  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          
+
+          <div class="body" role="main">
+            
+  <h1>Source code for reglm.interpret</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">pandas</span> <span class="k">as</span> <span class="nn">pd</span>
+<span class="kn">from</span> <span class="nn">enformer_pytorch.data</span> <span class="kn">import</span> <span class="n">str_to_one_hot</span>
+
+<span class="kn">from</span> <span class="nn">reglm.regression</span> <span class="kn">import</span> <span class="n">SeqDataset</span>
+
+
+<div class="viewcode-block" id="ISM_at_pos"><a class="viewcode-back" href="../../api/reglm.html#reglm.interpret.ISM_at_pos">[docs]</a><span class="k">def</span> <span class="nf">ISM_at_pos</span><span class="p">(</span><span class="n">seq</span><span class="p">,</span> <span class="n">pos</span><span class="p">,</span> <span class="n">drop_ref</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Perform in-silico mutagenesis at a single position in the sequence.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        seq (str): DNA sequence</span>
+<span class="sd">        pos (int): Position to mutate</span>
+<span class="sd">        drop_ref (bool): If True, the original base at the mutation position is dropped.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        List of mutated DNA sequences, of length 3 or 4</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">alt_bases</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;A&quot;</span><span class="p">,</span> <span class="s2">&quot;C&quot;</span><span class="p">,</span> <span class="s2">&quot;G&quot;</span><span class="p">,</span> <span class="s2">&quot;T&quot;</span><span class="p">]</span>
+    <span class="k">if</span> <span class="n">drop_ref</span><span class="p">:</span>
+        <span class="n">alt_bases</span><span class="o">.</span><span class="n">remove</span><span class="p">(</span><span class="n">seq</span><span class="p">[</span><span class="n">pos</span><span class="p">])</span>
+
+    <span class="k">return</span> <span class="p">[</span><span class="n">seq</span><span class="p">[:</span><span class="n">pos</span><span class="p">]</span> <span class="o">+</span> <span class="n">base</span> <span class="o">+</span> <span class="n">seq</span><span class="p">[</span><span class="n">pos</span> <span class="o">+</span> <span class="mi">1</span> <span class="p">:]</span> <span class="k">for</span> <span class="n">base</span> <span class="ow">in</span> <span class="n">alt_bases</span><span class="p">]</span></div>
+
+
+<div class="viewcode-block" id="ISM"><a class="viewcode-back" href="../../api/reglm.html#reglm.interpret.ISM">[docs]</a><span class="k">def</span> <span class="nf">ISM</span><span class="p">(</span><span class="n">seq</span><span class="p">,</span> <span class="n">drop_ref</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Perform in-silico mutagenesis of a DNA sequence.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        seq (str): DNA sequence</span>
+<span class="sd">        drop_ref (bool): If True, the original base at the mutation position is dropped.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        List of mutated DNA sequences, of length 3*len(seq) or 4*len(seq)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="nb">list</span><span class="p">(</span>
+        <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">ISM_at_pos</span><span class="p">(</span><span class="n">seq</span><span class="p">,</span> <span class="n">pos</span><span class="p">,</span> <span class="n">drop_ref</span><span class="o">=</span><span class="n">drop_ref</span><span class="p">)</span> <span class="k">for</span> <span class="n">pos</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">seq</span><span class="p">))]</span>
+        <span class="p">)</span>
+    <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="ISM_predict"><a class="viewcode-back" href="../../api/reglm.html#reglm.interpret.ISM_predict">[docs]</a><span class="k">def</span> <span class="nf">ISM_predict</span><span class="p">(</span><span class="n">seqs</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="n">seq_len</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">512</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">num_workers</span><span class="o">=</span><span class="mi">8</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Perform in-silico mutagenesis of DNA sequences and make predictions with a</span>
+<span class="sd">    regression model to get per-base importance scores</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        seqs (list): List of DNA sequences of equal length</span>
+<span class="sd">        model (pl.LightningModule): regression model</span>
+<span class="sd">        seq_len (int): Maximum sequence length for regression model</span>
+<span class="sd">        batch_size (int): Batch size for prediction</span>
+<span class="sd">        num_workers (int): Number of workers for prediction</span>
+<span class="sd">        device (int): GPU index for prediction</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        preds (np.array): Array of shape (number of sequences x length of sequences x 4)</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1"># Get sequence length</span>
+    <span class="n">actual_seq_lens</span> <span class="o">=</span> <span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">seq</span><span class="p">)</span> <span class="k">for</span> <span class="n">seq</span> <span class="ow">in</span> <span class="n">seqs</span><span class="p">]</span>
+    <span class="k">assert</span> <span class="p">(</span>
+        <span class="nb">len</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">actual_seq_lens</span><span class="p">))</span> <span class="o">==</span> <span class="mi">1</span>
+    <span class="p">),</span> <span class="s2">&quot;This function currently requires all sequences to have equal length&quot;</span>
+    <span class="n">actual_seq_len</span> <span class="o">=</span> <span class="n">actual_seq_lens</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+
+    <span class="c1"># Perform ISM</span>
+    <span class="n">mutated_seqs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">([</span><span class="n">ISM</span><span class="p">(</span><span class="n">seq</span><span class="p">,</span> <span class="n">drop_ref</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="k">for</span> <span class="n">seq</span> <span class="ow">in</span> <span class="n">seqs</span><span class="p">])</span>  <span class="c1"># N*4</span>
+
+    <span class="c1"># Get predictions for all mutated sequences</span>
+    <span class="n">dataset</span> <span class="o">=</span> <span class="n">SeqDataset</span><span class="p">(</span><span class="n">mutated_seqs</span><span class="p">,</span> <span class="n">seq_len</span><span class="o">=</span><span class="n">seq_len</span><span class="p">)</span>
+    <span class="n">preds</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">predict_on_dataset</span><span class="p">(</span>
+        <span class="n">dataset</span><span class="p">,</span>
+        <span class="n">device</span><span class="o">=</span><span class="n">device</span><span class="p">,</span>
+        <span class="n">batch_size</span><span class="o">=</span><span class="n">batch_size</span><span class="p">,</span>
+        <span class="n">num_workers</span><span class="o">=</span><span class="n">num_workers</span><span class="p">,</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">squeeze</span><span class="p">()</span>  <span class="c1"># Nx4xseq_len</span>
+
+    <span class="c1"># Reshape the predictions</span>
+    <span class="k">assert</span> <span class="n">preds</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="n">seqs</span><span class="p">)</span> <span class="o">*</span> <span class="mi">4</span> <span class="o">*</span> <span class="n">actual_seq_len</span><span class="p">,</span> <span class="n">preds</span><span class="o">.</span><span class="n">shape</span>
+    <span class="n">preds</span> <span class="o">=</span> <span class="n">preds</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">seqs</span><span class="p">),</span> <span class="mi">4</span> <span class="o">*</span> <span class="n">actual_seq_len</span><span class="p">)</span>  <span class="c1"># N, 4*seq_len</span>
+    <span class="n">preds</span> <span class="o">=</span> <span class="n">preds</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">seqs</span><span class="p">),</span> <span class="n">actual_seq_len</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>  <span class="c1"># N, seq_len, 4</span>
+
+    <span class="k">return</span> <span class="n">preds</span></div>
+
+
+<div class="viewcode-block" id="ISM_score"><a class="viewcode-back" href="../../api/reglm.html#reglm.interpret.ISM_score">[docs]</a><span class="k">def</span> <span class="nf">ISM_score</span><span class="p">(</span><span class="n">seqs</span><span class="p">,</span> <span class="n">preds</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Calculate a per-base importance score from ISM predictions</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        seqs (list): List of sequences</span>
+<span class="sd">        preds (np.array): ISM predictions from seqs</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        scores (np.array): Array of shape (N x seq_len), containing</span>
+<span class="sd">        per-base importance scores</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Convert original sequences to one-hot</span>
+    <span class="n">one_hot</span> <span class="o">=</span> <span class="n">str_to_one_hot</span><span class="p">(</span><span class="n">seqs</span><span class="p">)</span><span class="o">.</span><span class="n">numpy</span><span class="p">()</span>  <span class="c1"># N, seq_len, 4</span>
+
+    <span class="c1"># Get the predictions for reference bases</span>
+    <span class="n">ref_preds</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">preds</span> <span class="o">*</span> <span class="n">one_hot</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">keepdims</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>  <span class="c1"># N, seq_len, 1</span>
+
+    <span class="c1"># Take the negative log-ratio of the predicted value</span>
+    <span class="c1"># relative to the original sequence</span>
+    <span class="n">scores</span> <span class="o">=</span> <span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">log2</span><span class="p">(</span><span class="n">preds</span> <span class="o">/</span> <span class="n">ref_preds</span><span class="p">)</span>  <span class="c1"># N, seq_len, 4</span>
+
+    <span class="c1"># Make mask</span>
+    <span class="n">mask</span> <span class="o">=</span> <span class="o">~</span><span class="n">one_hot</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">bool</span><span class="p">)</span>
+
+    <span class="c1"># Calculate the average effect of mutation</span>
+    <span class="n">mean_scores</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros_like</span><span class="p">(</span><span class="n">scores</span><span class="p">[:,</span> <span class="p">:,</span> <span class="mi">0</span><span class="p">])</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">scores</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]):</span>
+        <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">scores</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]):</span>
+            <span class="n">mean_scores</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">]</span> <span class="o">=</span> <span class="n">scores</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">][</span><span class="n">mask</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="n">j</span><span class="p">]]</span><span class="o">.</span><span class="n">mean</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">mean_scores</span></div>
+
+
+<div class="viewcode-block" id="generate_random_sequences"><a class="viewcode-back" href="../../api/reglm.html#reglm.interpret.generate_random_sequences">[docs]</a><span class="k">def</span> <span class="nf">generate_random_sequences</span><span class="p">(</span><span class="n">n</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">seq_len</span><span class="o">=</span><span class="mi">1024</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Generate random DNA sequences.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        n (int): Number of sequences to generate (default 1).</span>
+<span class="sd">        seq_len (int): Length of each sequence (default 1024).</span>
+<span class="sd">        seed (int): Seed value for random number generator (default 0).</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        Generated sequences as a list of strings.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Set random seed</span>
+    <span class="n">rng</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">RandomState</span><span class="p">(</span><span class="n">seed</span><span class="p">)</span>
+
+    <span class="c1"># Generate sequences</span>
+    <span class="n">seqs</span> <span class="o">=</span> <span class="n">rng</span><span class="o">.</span><span class="n">choice</span><span class="p">([</span><span class="s2">&quot;A&quot;</span><span class="p">,</span> <span class="s2">&quot;C&quot;</span><span class="p">,</span> <span class="s2">&quot;G&quot;</span><span class="p">,</span> <span class="s2">&quot;T&quot;</span><span class="p">],</span> <span class="n">size</span><span class="o">=</span><span class="n">n</span> <span class="o">*</span> <span class="n">seq_len</span><span class="p">,</span> <span class="n">replace</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span>
+        <span class="p">[</span><span class="n">n</span><span class="p">,</span> <span class="n">seq_len</span><span class="p">]</span>
+    <span class="p">)</span>
+
+    <span class="k">return</span> <span class="p">[</span><span class="s2">&quot;&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">seq</span><span class="p">)</span> <span class="k">for</span> <span class="n">seq</span> <span class="ow">in</span> <span class="n">seqs</span><span class="p">]</span></div>
+
+
+<div class="viewcode-block" id="motif_likelihood"><a class="viewcode-back" href="../../api/reglm.html#reglm.interpret.motif_likelihood">[docs]</a><span class="k">def</span> <span class="nf">motif_likelihood</span><span class="p">(</span><span class="n">seqs</span><span class="p">,</span> <span class="n">motif</span><span class="p">,</span> <span class="n">label</span><span class="p">,</span> <span class="n">model</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Return the log-likelihood of a motif occurring at the end of</span>
+<span class="sd">    each of the given sequences.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        seqs (list): Sequences</span>
+<span class="sd">        motif (seq): Motif sequence</span>
+<span class="sd">        label (list): Label for the regLM model</span>
+<span class="sd">        model (pl.LightningModule): regLM model</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        (list): log-likelihoods</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">log_likelihood_per_pos</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">P_seqs_given_labels</span><span class="p">(</span>
+        <span class="n">seqs</span><span class="o">=</span><span class="p">[</span><span class="n">seq</span> <span class="o">+</span> <span class="n">motif</span> <span class="k">for</span> <span class="n">seq</span> <span class="ow">in</span> <span class="n">seqs</span><span class="p">],</span>
+        <span class="n">labels</span><span class="o">=</span><span class="p">[</span><span class="n">label</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">seqs</span><span class="p">),</span>
+        <span class="n">per_pos</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="n">log</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">motif_likelihood</span> <span class="o">=</span> <span class="n">log_likelihood_per_pos</span><span class="p">[:,</span> <span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">motif</span><span class="p">)</span> <span class="p">:]</span>
+    <span class="k">assert</span> <span class="n">motif_likelihood</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">seqs</span><span class="p">),</span> <span class="nb">len</span><span class="p">(</span><span class="n">motif</span><span class="p">)),</span> <span class="n">motif_likelihood</span><span class="o">.</span><span class="n">shape</span>
+    <span class="k">return</span> <span class="n">motif_likelihood</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="motif_insert"><a class="viewcode-back" href="../../api/reglm.html#reglm.interpret.motif_insert">[docs]</a><span class="k">def</span> <span class="nf">motif_insert</span><span class="p">(</span><span class="n">motif_dict</span><span class="p">,</span> <span class="n">model</span><span class="p">,</span> <span class="n">label</span><span class="p">,</span> <span class="n">ref_label</span><span class="p">,</span> <span class="n">seq_len</span><span class="p">,</span> <span class="n">n</span><span class="o">=</span><span class="mi">100</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Insert motifs into random sequences and calculate log-likelihood ratio</span>
+<span class="sd">    of each motif given label vs. reference label.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        motif_dict (dict): Dictionary with key-value pairs such as</span>
+<span class="sd">            motif ID: consensus sequence</span>
+<span class="sd">        model (pl.LightningModule): regLM model</span>
+<span class="sd">        label (list): Label for the regLM model</span>
+<span class="sd">        ref_label (str):</span>
+<span class="sd">        seq_len (int): Length of random sequences preceding the motif</span>
+<span class="sd">        n (int): number of random sequences to insert the motif in</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        (pd.DataFrame): Dataframe containing log likelihood ratios of motif-containing</span>
+<span class="sd">        sequences</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">()</span>
+    <span class="n">random_seqs</span> <span class="o">=</span> <span class="n">generate_random_sequences</span><span class="p">(</span><span class="n">n</span><span class="o">=</span><span class="n">n</span><span class="p">,</span> <span class="n">seq_len</span><span class="o">=</span><span class="n">seq_len</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">motif_id</span><span class="p">,</span> <span class="n">consensus</span> <span class="ow">in</span> <span class="n">motif_dict</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="c1"># Compute log-likelihood with token 00 and 44</span>
+        <span class="n">LL_with_label</span> <span class="o">=</span> <span class="n">motif_likelihood</span><span class="p">(</span><span class="n">random_seqs</span><span class="p">,</span> <span class="n">consensus</span><span class="p">,</span> <span class="n">label</span><span class="p">,</span> <span class="n">model</span><span class="p">)</span>
+        <span class="n">LL_with_ref</span> <span class="o">=</span> <span class="n">motif_likelihood</span><span class="p">(</span><span class="n">random_seqs</span><span class="p">,</span> <span class="n">consensus</span><span class="p">,</span> <span class="n">ref_label</span><span class="p">,</span> <span class="n">model</span><span class="p">)</span>
+
+        <span class="c1"># Compute log-likelihood ratio</span>
+        <span class="n">ratio</span> <span class="o">=</span> <span class="n">LL_with_label</span> <span class="o">-</span> <span class="n">LL_with_ref</span>
+        <span class="n">curr_out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span>
+            <span class="p">{</span>
+                <span class="s2">&quot;Sequence&quot;</span><span class="p">:</span> <span class="n">random_seqs</span><span class="p">,</span>
+                <span class="s2">&quot;Motif&quot;</span><span class="p">:</span> <span class="n">motif_id</span><span class="p">,</span>
+                <span class="s2">&quot;LL_ratio&quot;</span><span class="p">:</span> <span class="n">ratio</span><span class="p">,</span>
+            <span class="p">}</span>
+        <span class="p">)</span>
+        <span class="n">out</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">([</span><span class="n">out</span><span class="p">,</span> <span class="n">curr_out</span><span class="p">])</span>
+
+    <span class="k">return</span> <span class="n">out</span></div>
+</pre></div>
+
+          </div>
+          
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="main navigation">
+        <div class="sphinxsidebarwrapper">
+<h1 class="logo"><a href="../../index.html">regLM</a></h1>
+
+
+
+
+
+
+
+
+<h3>Navigation</h3>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../readme.html">Overview</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../license.html">License</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../authors.html">Authors</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../api/modules.html">Module Reference</a></li>
+</ul>
+
+<div class="relations">
+<h3>Related Topics</h3>
+<ul>
+  <li><a href="../../index.html">Documentation overview</a><ul>
+  <li><a href="../index.html">Module code</a><ul>
+  </ul></li>
+  </ul></li>
+</ul>
+</div>
+<div id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</div>
+<script>$('#searchbox').show(0);</script>
+
+
+
+
+
+
+
+
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="footer">
+      &#169;2023, Genentech, Inc..
+      
+      |
+      Powered by <a href="https://www.sphinx-doc.org/">Sphinx 4.5.0</a>
+      &amp; <a href="https://alabaster.readthedocs.io">Alabaster 0.7.16</a>
+      
+    </div>
+
+    
+
+    
+  </body>
+</html>

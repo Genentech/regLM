@@ -24,8 +24,8 @@ cd regLM
 pip install .
 ```
 
-## Preprint
+## Publication
 
-https://www.biorxiv.org/content/10.1101/2024.02.14.580373
+https://genome.cshlp.org/content/early/2024/09/24/gr.279142.124.abstract
 
-Code used to perform the experiments in the regLM paper, along with trained model weights and synthetic sequences, are available at [Zenodo](https://doi.org/10.5281/zenodo.10669334).
+Lal, A., Garfield, D., Biancalani, T., & Eraslan, G. (2024). Designing realistic regulatory DNA with autoregressive language models. Genome Research.
